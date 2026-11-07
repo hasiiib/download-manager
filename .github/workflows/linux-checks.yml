@@ -17,7 +17,7 @@ jobs:
       - name: Install Tauri system libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf aria2
       - name: Install frontend dependencies
         run: npm install
       - name: Typecheck and build frontend
@@ -26,3 +26,5 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Local aria2 RPC integration test
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v
