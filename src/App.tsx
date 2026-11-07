@@ -19,6 +19,7 @@ type DownloadItem = {
   path: string;
   error?: string | null;
 };
+type TorrentFile = { index: number; path: string; length: number; completedLength: number; selected: boolean };
 type Settings = {
   connections: number;
   concurrent: number;
@@ -52,6 +53,11 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaults);
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [torrentDialog, setTorrentDialog] = useState<DownloadItem | null>(null);
+  const [torrentFiles, setTorrentFiles] = useState<TorrentFile[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
+  const [torrentError, setTorrentError] = useState("");
+  const [torrentBusy, setTorrentBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
   const [refreshError, setRefreshError] = useState("");
@@ -96,6 +102,32 @@ export default function App() {
       await refresh();
     } catch (err) { setMessage(String(err)); }
     finally { setWorking(false); }
+  };
+
+  const showTorrentFiles = async (item: DownloadItem) => {
+    setTorrentDialog(item);
+    setTorrentFiles([]);
+    setSelectedFiles([]);
+    setTorrentError("");
+    setTorrentBusy(true);
+    try {
+      const files = await invoke<TorrentFile[]>("get_torrent_files", { gid: item.gid });
+      setTorrentFiles(files);
+      setSelectedFiles(files.filter(file => file.selected).map(file => file.index));
+    } catch (err) { setTorrentError(String(err)); }
+    finally { setTorrentBusy(false); }
+  };
+
+  const saveTorrentFiles = async () => {
+    if (!torrentDialog) return;
+    setTorrentBusy(true);
+    setTorrentError("");
+    try {
+      await invoke("select_torrent_files", { gid: torrentDialog.gid, indexes: selectedFiles });
+      setTorrentDialog(null);
+      await refresh();
+    } catch (err) { setTorrentError(String(err)); }
+    finally { setTorrentBusy(false); }
   };
 
   const moveQueue = async (gid: string, direction: "top" | "bottom") => {
@@ -173,6 +205,7 @@ export default function App() {
               <small>{formatSize(item.completedLength)}{item.totalLength ? " / " + formatSize(item.totalLength) : ""}</small>
               {item.status === "active" && <small>{formatSize(item.downloadSpeed)}/s</small>}</div>
             <div className="row-actions">
+              {isTorrent(item.source) && item.status !== "removed" && <button title="Choose files in torrent" aria-label={"Torrent files " + item.name} onClick={() => void showTorrentFiles(item)}><FolderOpen size={17}/></button>}
               {item.status === "waiting" && <><button title="Move to top of queue" aria-label={"Prioritize " + item.name} onClick={() => void moveQueue(item.gid, "top")}><ArrowUpToLine size={17}/></button><button title="Move to bottom of queue" aria-label={"Deprioritize " + item.name} onClick={() => void moveQueue(item.gid, "bottom")}><QueueBottomIcon size={17}/></button></>}
               {["active", "waiting"].includes(item.status) && <button title="Pause" aria-label={"Pause " + item.name} onClick={() => void control(item.gid, "pause")}><Pause size={17}/></button>}
               {item.status === "paused" && <button title="Resume" aria-label={"Resume " + item.name} onClick={() => void control(item.gid, "resume")}><Play size={17}/></button>}
@@ -184,6 +217,21 @@ export default function App() {
       </section>
       <footer><span><SlidersHorizontal size={15}/> Parallel connections, torrents and magnet links powered by aria2.</span><span>LINUX FIRST · CROSS-PLATFORM ROADMAP</span></footer>
     </main>
+    {torrentDialog && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setTorrentDialog(null); }}>
+      <section className="modal torrent-modal" role="dialog" aria-modal="true" aria-label="Torrent file selection">
+        <div className="modal-title"><div><Magnet size={22}/><h2>Select torrent files</h2></div><button aria-label="Close file selection" onClick={() => setTorrentDialog(null)}><X size={18}/></button></div>
+        <p title={torrentDialog.source}>Choose which files to download in {torrentDialog.name}. Changing file selection can restart the transfer internally.</p>
+        {torrentError && <p className="error" role="alert">{torrentError}</p>}
+        {torrentBusy && <p>Loading torrent metadata...</p>}
+        {!torrentBusy && torrentFiles.length === 0 && !torrentError && <p>File details are not available yet.</p>}
+        {torrentFiles.length > 0 && <div className="torrent-file-list">{torrentFiles.map(file => <label key={file.index} className="torrent-file">
+          <input type="checkbox" checked={selectedFiles.includes(file.index)}
+            onChange={event => setSelectedFiles(prev => event.target.checked ? [...prev, file.index] : prev.filter(i => i !== file.index))}/>
+          <span><strong title={file.path}>{file.path.split("/").pop() || "File " + file.index}</strong><small title={file.path}>{file.path} · {formatSize(file.length)} · {formatSize(file.completedLength)} complete</small></span>
+        </label>)}</div>}
+        <div className="modal-actions"><button onClick={() => setTorrentDialog(null)}>Cancel</button><button disabled={torrentBusy || selectedFiles.length === 0 || torrentFiles.length === 0} onClick={() => void saveTorrentFiles()}>Apply selection</button></div>
+      </section>
+    </div>}
     {settingsOpen && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setSettingsOpen(false); }}>
       <section className="modal" role="dialog" aria-modal="true" aria-label="Download settings">
         <div className="modal-title"><div><Settings2 size={22}/><h2>Download settings</h2></div><button aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X size={18}/></button></div>
