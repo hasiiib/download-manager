@@ -21,3 +21,5 @@ tokio = { version = "1", features = ["fs", "io-util"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 futures-util = "0.3"
 url = "2"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
