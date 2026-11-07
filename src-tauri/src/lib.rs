@@ -173,14 +173,14 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
     if input.len() > 8192 { return Err("Download source is too long".into()); }
     if input.is_empty() { return Err("Paste a download URL, magnet link or a .torrent/.meta4 path".into()); }
     let settings = engine.settings.lock().map_err(|e| e.to_string())?.clone();
-    let opts = json!({
+    let mut opts = json!({
         "dir": settings.download_dir,
         "split": settings.connections.to_string(),
         "max-connection-per-server": settings.connections.to_string(),
         "continue": "true",
-        "seed-time": settings.seed_minutes.to_string(),
     });
     let gid = if input.starts_with("magnet:?") {
+        opts["seed-time"] = json!(settings.seed_minutes.to_string());
         engine.rpc("addUri", vec![json!([input]), opts]).await?
     } else if input.starts_with("http://") || input.starts_with("https://")
         || input.starts_with("ftp://") || input.starts_with("sftp://") {
@@ -197,7 +197,10 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
         let b64 = base64::engine::general_purpose::STANDARD.encode(content);
         let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("").to_ascii_lowercase();
         match ext.as_str() {
-            "torrent" => engine.rpc("addTorrent", vec![json!(b64), json!([]), opts]).await?,
+            "torrent" => {
+                opts["seed-time"] = json!(settings.seed_minutes.to_string());
+                engine.rpc("addTorrent", vec![json!(b64), json!([]), opts]).await?
+            },
             "meta4" | "metalink" => engine.rpc("addMetalink", vec![json!(b64), opts]).await?,
             _ => return Err("Select a .torrent, .meta4 or .metalink file".into()),
         }
