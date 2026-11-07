@@ -184,6 +184,10 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
         engine.rpc("addUri", vec![json!([input]), opts]).await?
     } else if input.starts_with("http://") || input.starts_with("https://")
         || input.starts_with("ftp://") || input.starts_with("sftp://") {
+        let url_path = input.split('?').next().unwrap_or(input);
+        if url_path.to_ascii_lowercase().ends_with(".torrent") {
+            opts["seed-time"] = json!(settings.seed_minutes.to_string());
+        }
         engine.rpc("addUri", vec![json!([input]), opts]).await?
     } else {
         let path = if input.starts_with("file://") {
