@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
-  Activity, ArrowDownToLine, CheckCircle2, Clock3, Download, FolderOpen, HardDrive,
+  Activity, ArrowDownToLine, ArrowUpToLine, ArrowDownToLine as QueueBottomIcon, CheckCircle2, Clock3, Download, FolderOpen, HardDrive,
   Link2, Magnet, Pause, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal,
   Trash2, X, XCircle, Zap
 } from "lucide-react";
@@ -98,6 +98,12 @@ export default function App() {
     finally { setWorking(false); }
   };
 
+  const moveQueue = async (gid: string, direction: "top" | "bottom") => {
+    setMessage("");
+    try { await invoke("move_queued_download", { gid, direction }); await refresh(); }
+    catch (err) { setMessage(String(err)); }
+  };
+
   const retry = async (item: DownloadItem) => {
     setMessage("");
     try { await invoke("add_download", { source: item.source }); await refresh(); }
@@ -152,7 +158,7 @@ export default function App() {
         <div className="stat"><div className="stat-icon green"><CheckCircle2 size={21}/></div><div><small>Completed</small><strong>{done}</strong></div></div>
         <div className="stat stat-speed"><div className="stat-icon violet"><Zap size={21}/></div><div><small>Total download speed</small><strong>{formatSize(speed)}/s</strong></div></div>
       </section>
-      <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · SFTP · MAGNET · TORRENT · METALINK</span></div>
+      <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · MAGNET · TORRENT · METALINK</span></div>
         <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button></div>
         {message && <p className="error" role="alert">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
@@ -167,6 +173,7 @@ export default function App() {
               <small>{formatSize(item.completedLength)}{item.totalLength ? " / " + formatSize(item.totalLength) : ""}</small>
               {item.status === "active" && <small>{formatSize(item.downloadSpeed)}/s</small>}</div>
             <div className="row-actions">
+              {item.status === "waiting" && <><button title="Move to top of queue" aria-label={"Prioritize " + item.name} onClick={() => void moveQueue(item.gid, "top")}><ArrowUpToLine size={17}/></button><button title="Move to bottom of queue" aria-label={"Deprioritize " + item.name} onClick={() => void moveQueue(item.gid, "bottom")}><QueueBottomIcon size={17}/></button></>}
               {["active", "waiting"].includes(item.status) && <button title="Pause" aria-label={"Pause " + item.name} onClick={() => void control(item.gid, "pause")}><Pause size={17}/></button>}
               {item.status === "paused" && <button title="Resume" aria-label={"Resume " + item.name} onClick={() => void control(item.gid, "resume")}><Play size={17}/></button>}
               {activeState(item.status) && <button title="Cancel" aria-label={"Cancel " + item.name} onClick={() => void control(item.gid, "cancel")}><X size={17}/></button>}
