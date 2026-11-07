@@ -54,6 +54,7 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
   const [refreshError, setRefreshError] = useState("");
+  const [settingsError, setSettingsError] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -96,6 +97,12 @@ export default function App() {
     finally { setWorking(false); }
   };
 
+  const retry = async (item: DownloadItem) => {
+    setMessage("");
+    try { await invoke("add_download", { source: item.source }); await refresh(); }
+    catch (err) { setMessage(String(err)); }
+  };
+
   const control = async (gid: string, action: "pause" | "resume" | "cancel") => {
     setMessage("");
     try { await invoke("control_download", { gid, action }); await refresh(); }
@@ -109,11 +116,11 @@ export default function App() {
 
   const save = async () => {
     setWorking(true);
-    setMessage("");
+    setSettingsError("");
     try {
       await invoke("save_settings", { settings: { ...draft, connections: Number(draft.connections), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib) } });
       setSettings(draft); setSettingsOpen(false);
-    } catch (err) { setMessage(String(err)); }
+    } catch (err) { setSettingsError(String(err)); }
     finally { setWorking(false); }
   };
 
@@ -132,7 +139,7 @@ export default function App() {
       <button className={filter === "torrent" ? "nav active" : "nav"} onClick={() => setFilter("torrent")}><Magnet size={18} /> Torrents <b>{items.filter(d => isTorrent(d.source)).length}</b></button>
       <button className={filter === "error" ? "nav active" : "nav"} onClick={() => setFilter("error")}><XCircle size={18} /> Failed</button>
       <div className="nav-label nav-label-secondary">PREFERENCES</div>
-      <button className="nav" onClick={() => { setDraft(settings); setSettingsOpen(true); }}><Settings2 size={18} /> Settings</button>
+      <button className="nav" onClick={() => { setDraft(settings); setSettingsError(""); setSettingsOpen(true); }}><Settings2 size={18} /> Settings</button>
       <div className="sidebar-bottom"><div className="side-note"><ShieldCheck size={20}/><div><strong>Private RPC engine</strong><p>aria2 runs on localhost with a private token.</p></div></div><div className="version">DEVELOPMENT PREVIEW · v0.2</div></div>
     </aside>
     <main className="main">
@@ -162,6 +169,7 @@ export default function App() {
               {["active", "waiting"].includes(item.status) && <button title="Pause" aria-label={"Pause " + item.name} onClick={() => void control(item.gid, "pause")}><Pause size={17}/></button>}
               {item.status === "paused" && <button title="Resume" aria-label={"Resume " + item.name} onClick={() => void control(item.gid, "resume")}><Play size={17}/></button>}
               {activeState(item.status) && <button title="Cancel" aria-label={"Cancel " + item.name} onClick={() => void control(item.gid, "cancel")}><X size={17}/></button>}
+              {["error", "removed", "interrupted"].includes(item.status) && <button title="Retry download" aria-label={"Retry " + item.name} onClick={() => void retry(item)}><Play size={17}/></button>}
               {!activeState(item.status) && <button title="Remove from history (does not delete files)" aria-label={"Forget " + item.name} onClick={() => void forget(item.gid)}><Trash2 size={17}/></button>}
             </div>
           </article>)}</div>}
@@ -176,6 +184,7 @@ export default function App() {
         <label><span><Download size={16}/> Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
         <label><span><Activity size={16}/> Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
         <label><span><FolderOpen size={16}/> Download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
+        {settingsError && <p className="error" role="alert">{settingsError}</p>}
         <div className="modal-actions"><button onClick={() => setSettingsOpen(false)}>Cancel</button><button disabled={working} onClick={() => void save()}>Save settings</button></div>
       </section>
     </div>}
