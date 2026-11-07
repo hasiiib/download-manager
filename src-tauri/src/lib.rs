@@ -307,6 +307,95 @@ async fn control_download(engine: State<'_, Engine>, gid: String, action: String
 }
 
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentFile {
+    index: u32,
+    path: String,
+    length: u64,
+    completed_length: u64,
+    selected: bool,
+}
+
+fn parse_torrent_files(value: &Value) -> Result<Vec<TorrentFile>, String> {
+    let entries = value.as_array().ok_or("aria2 did not return a file list")?;
+    entries.iter().map(|entry| {
+        let numeric = |field: &str| -> Result<u64, String> {
+            entry.get(field).and_then(Value::as_str)
+                .ok_or_else(|| format!("Missing {field}"))
+                .and_then(|s| s.parse::<u64>().map_err(|_| format!("Invalid {field}")))
+        };
+        let index = u32::try_from(numeric("index")?).map_err(|_| "Invalid file index")?;
+        if index == 0 { return Err("Invalid zero-based file index".into()); }
+        Ok(TorrentFile {
+            index,
+            path: entry.get("path").and_then(Value::as_str).unwrap_or("").to_string(),
+            length: numeric("length")?,
+            completed_length: numeric("completedLength")?,
+            selected: entry.get("selected").and_then(Value::as_str) == Some("true"),
+        })
+    }).collect()
+}
+
+fn validate_file_selection(selected: &[u32], files: &[TorrentFile]) -> Result<String, String> {
+    if selected.is_empty() { return Err("Choose at least one file".into()); }
+    let mut values = selected.to_vec();
+    values.sort_unstable();
+    values.dedup();
+    if values.len() != selected.len() { return Err("Duplicate file indexes".into()); }
+    if values.iter().any(|index| !files.iter().any(|file| file.index == *index)) {
+        return Err("Selected file index does not belong to this download".into());
+    }
+    Ok(values.iter().map(ToString::to_string).collect::<Vec<_>>().join(","))
+}
+
+#[tauri::command]
+async fn get_torrent_files(engine: State<'_, Engine>, gid: String) -> Result<Vec<TorrentFile>, String> {
+    let item = engine.downloads.lock().map_err(|e| e.to_string())?
+        .get(&gid).cloned().ok_or("Unknown download")?;
+    if !item.source.starts_with("magnet:") && !item.source.to_lowercase().contains(".torrent") {
+        return Err("This download is not a torrent".into());
+    }
+    let status = engine.rpc("tellStatus", vec![json!(gid.clone())]).await?;
+    if status.get("bittorrent").is_none() {
+        return Err("Waiting for torrent metadata. Try again after metadata is available.".into());
+    }
+    let response = engine.rpc("getFiles", vec![json!(gid)]).await?;
+    parse_torrent_files(&response)
+}
+
+#[tauri::command]
+async fn select_torrent_files(engine: State<'_, Engine>, gid: String, indexes: Vec<u32>) -> Result<(), String> {
+    let item = engine.downloads.lock().map_err(|e| e.to_string())?.get(&gid).cloned().ok_or("Unknown download")?;
+    if !item.source.starts_with("magnet:") && !item.source.to_ascii_lowercase().contains(".torrent") {
+        return Err("This download is not a torrent".into());
+    }
+    let response = engine.rpc("getFiles", vec![json!(gid.clone())]).await?;
+    let files = parse_torrent_files(&response)?;
+    let selection = validate_file_selection(&indexes, &files)?;
+    engine.rpc("changeOption", vec![json!(gid), json!({ "select-file": selection })]).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod torrent_selection_tests {
+    use super::*;
+    #[test]
+    fn parses_file_data_and_validates_selection() {
+        let files = parse_torrent_files(&json!([
+            { "index":"1", "path":"/tmp/one", "length":"100", "completedLength":"25", "selected":"true" },
+            { "index":"2", "path":"/tmp/two", "length":"200", "completedLength":"0", "selected":"false" }
+        ])).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].completed_length, 25);
+        assert!(files[0].selected);
+        assert_eq!(validate_file_selection(&[2, 1], &files).unwrap(), "1,2");
+        assert!(validate_file_selection(&[], &files).is_err());
+        assert!(validate_file_selection(&[3], &files).is_err());
+        assert!(validate_file_selection(&[1, 1], &files).is_err());
+    }
+}
+
 #[tauri::command]
 async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction: String) -> Result<(), String> {
     let position = match direction.as_str() {
@@ -394,7 +483,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, list_downloads, control_download, move_queued_download, forget_download, get_settings, save_settings
+            add_download, list_downloads, control_download, move_queued_download, get_torrent_files, select_torrent_files, forget_download, get_settings, save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Download Manager");
