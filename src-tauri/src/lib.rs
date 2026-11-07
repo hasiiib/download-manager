@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::{collections::BTreeMap, fs, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex};
 use tauri::State;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Download {
     gid: String,
@@ -113,7 +113,8 @@ impl Engine {
             .arg("--seed-time=0")
             .arg("--console-log-level=warn")
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .spawn()?;
+            .spawn().map_err(|error| std::io::Error::new(error.kind(),
+                format!("Could not start aria2c ({error}). Install it with: sudo apt install aria2")))?;
         Ok(Self {
             client: reqwest::Client::new(),
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
@@ -126,7 +127,7 @@ impl Engine {
         let mut params = vec![json!(format!("token:{}", self.token))];
         params.extend(args);
         // A small startup grace period also covers the first call after launching aria2c.
-        for attempt in 0..15 {
+        for attempt in 0..10 {
             let result = self.client.post(&self.endpoint)
                 .json(&json!({"jsonrpc":"2.0","id":"download-manager","method":format!("aria2.{method}"),"params":params}))
                 .timeout(std::time::Duration::from_secs(3))
@@ -139,8 +140,10 @@ impl Engine {
                     }
                     return response.get("result").cloned().ok_or_else(|| "Missing aria2 RPC result".into());
                 }
-                Err(error) if attempt == 14 => return Err(format!("aria2 RPC unavailable: {error}")),
-                Err(_) => tokio::time::sleep(std::time::Duration::from_millis(200)).await,
+                Err(error) if error.is_connect() && attempt < 9 => {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                }
+                Err(error) => return Err(format!("aria2 RPC unavailable: {error}")),
             }
         }
         Err("aria2 RPC unavailable".into())
@@ -261,8 +264,14 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     updated.reverse();
     // Store completed state and filenames for display after restarting the application.
     if let Ok(mut entries) = engine.downloads.lock() {
-        for item in &updated { entries.insert(item.gid.clone(), item.clone()); }
-        let _ = save_json(&engine.data_dir.join("downloads.json"), &*entries);
+        let mut changed = false;
+        for item in &updated {
+            if entries.get(&item.gid) != Some(item) {
+                entries.insert(item.gid.clone(), item.clone());
+                changed = true;
+            }
+        }
+        if changed { let _ = save_json(&engine.data_dir.join("downloads.json"), &*entries); }
     }
     Ok(updated)
 }
