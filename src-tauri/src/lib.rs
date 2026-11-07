@@ -183,7 +183,7 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
         opts["seed-time"] = json!(settings.seed_minutes.to_string());
         engine.rpc("addUri", vec![json!([input]), opts]).await?
     } else if input.starts_with("http://") || input.starts_with("https://")
-        || input.starts_with("ftp://") || input.starts_with("sftp://") {
+        || input.starts_with("ftp://") {
         let url_path = input.split('?').next().unwrap_or(input);
         if url_path.to_ascii_lowercase().ends_with(".torrent") {
             opts["seed-time"] = json!(settings.seed_minutes.to_string());
@@ -294,7 +294,7 @@ async fn control_download(engine: State<'_, Engine>, gid: String, action: String
     let method = match action.as_str() {
         "pause" => "pause",
         "resume" => "unpause",
-        "cancel" => "remove",
+        "cancel" => "forceRemove",
         _ => return Err("Unsupported action".into()),
     };
     engine.rpc(method, vec![json!(gid.clone())]).await?;
@@ -303,6 +303,22 @@ async fn control_download(engine: State<'_, Engine>, gid: String, action: String
         if let Some(entry) = entries.get_mut(&gid) { entry.status = "removed".into(); }
         save_json(&engine.data_dir.join("downloads.json"), &*entries)?;
     }
+    Ok(())
+}
+
+
+#[tauri::command]
+async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction: String) -> Result<(), String> {
+    let position = match direction.as_str() {
+        "top" => 0,
+        "bottom" => 0,
+        _ => return Err("Unknown queue action".into()),
+    };
+    if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
+        return Err("Unknown download".into());
+    }
+    let how = if direction == "top" { "POS_SET" } else { "POS_END" };
+    engine.rpc("changePosition", vec![json!(gid), json!(position), json!(how)]).await?;
     Ok(())
 }
 
@@ -378,7 +394,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, list_downloads, control_download, forget_download, get_settings, save_settings
+            add_download, list_downloads, control_download, move_queued_download, forget_download, get_settings, save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Download Manager");
