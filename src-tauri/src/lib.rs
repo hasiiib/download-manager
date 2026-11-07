@@ -227,7 +227,8 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     let mut updated = Vec::with_capacity(snapshot.len());
     let mut discovered = Vec::new();
     for mut item in snapshot {
-        if let Ok(status) = engine.rpc("tellStatus", vec![json!(item.gid)]).await {
+        let result = engine.rpc("tellStatus", vec![json!(item.gid)]).await;
+        if let Ok(status) = result.as_ref() {
             // aria2 creates a follow-up GID after retrieving magnet/torrent metadata.
             // Track it separately so the actual payload remains visible and controllable.
             if let Some(children) = status.get("followedBy").and_then(Value::as_array) {
@@ -266,8 +267,10 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             if item.status == "error" {
                 item.error = status.get("errorMessage").and_then(Value::as_str).map(str::to_string);
             }
-        } else if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
-            item.status = "interrupted".into();
+        } else if result.as_ref().err().is_some_and(|error| error.contains("GID") && error.contains("not found")) {
+            if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
+                item.status = "interrupted".into();
+            }
             item.download_speed = 0;
             item.upload_speed = 0;
         }
