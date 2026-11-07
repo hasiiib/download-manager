@@ -37,6 +37,7 @@ impl Settings {
         if !(1..=16).contains(&self.connections) { return Err("Connections must be 1–16".into()); }
         if !(1..=10).contains(&self.concurrent) { return Err("Concurrent downloads must be 1–10".into()); }
         if self.download_dir.trim().is_empty() { return Err("Download folder cannot be empty".into()); }
+        if self.speed_limit_kib > 1_048_576 { return Err("Speed limit must be no more than 1048576 KiB/s".into()); }
         Ok(())
     }
 }
@@ -74,7 +75,15 @@ impl Engine {
         let settings: Settings = load_json(&data_dir.join("settings.json")).unwrap_or_else(Settings::defaults);
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
-        let history = load_json(&data_dir.join("downloads.json")).unwrap_or_default();
+        let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json")).unwrap_or_default();
+        // A process restart may invalidate an old aria2 GID. Avoid showing stale speed.
+        for download in history.values_mut() {
+            download.download_speed = 0;
+            download.upload_speed = 0;
+            if matches!(download.status.as_str(), "active" | "waiting") {
+                download.status = "interrupted".into();
+            }
+        }
         let session = data_dir.join("aria2.session");
         if !session.exists() { fs::write(&session, "")?; }
         let listener = TcpListener::bind("127.0.0.1:0")?;
@@ -156,6 +165,7 @@ impl Drop for Engine {
 #[tauri::command]
 async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Download, String> {
     let input = source.trim();
+    if input.len() > 8192 { return Err("Download source is too long".into()); }
     if input.is_empty() { return Err("Paste a download URL, magnet link or a .torrent/.meta4 path".into()); }
     let settings = engine.settings.lock().map_err(|e| e.to_string())?.clone();
     let opts = json!({
@@ -240,6 +250,10 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             if item.status == "error" {
                 item.error = status.get("errorMessage").and_then(Value::as_str).map(str::to_string);
             }
+        } else if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
+            item.status = "interrupted".into();
+            item.download_speed = 0;
+            item.upload_speed = 0;
         }
         updated.push(item);
     }
@@ -264,7 +278,12 @@ async fn control_download(engine: State<'_, Engine>, gid: String, action: String
         "cancel" => "remove",
         _ => return Err("Unsupported action".into()),
     };
-    engine.rpc(method, vec![json!(gid)]).await?;
+    engine.rpc(method, vec![json!(gid.clone())]).await?;
+    if action == "cancel" {
+        let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
+        if let Some(entry) = entries.get_mut(&gid) { entry.status = "removed".into(); }
+        save_json(&engine.data_dir.join("downloads.json"), &*entries)?;
+    }
     Ok(())
 }
 
@@ -298,6 +317,36 @@ fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String>
     }
     entries.remove(&gid);
     save_json(&engine.data_dir.join("downloads.json"), &*entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn validates_connection_limits() {
+        let mut settings = Settings::defaults();
+        assert!(settings.validate().is_ok());
+        settings.connections = 0;
+        assert!(settings.validate().is_err());
+        settings.connections = 16;
+        assert!(settings.validate().is_ok());
+        settings.concurrent = 11;
+        assert!(settings.validate().is_err());
+        settings.concurrent = 3;
+        settings.speed_limit_kib = 1_048_577;
+        assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn json_round_trip_keeps_download_identifiers() {
+        let item = Download { gid: "abc123".into(), source: "https://example.org/a.zip".into(),
+            name: "a.zip".into(), status: "complete".into(), completed_length: 30,
+            total_length: 30, download_speed: 0, upload_speed: 0,
+            path: "/tmp/a.zip".into(), error: None };
+        let encoded = serde_json::to_string(&item).unwrap();
+        let decoded: Download = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.gid, "abc123");
+        assert_eq!(decoded.completed_length, 30);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
