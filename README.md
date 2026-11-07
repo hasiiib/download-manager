@@ -9,6 +9,7 @@ A Linux-first desktop download manager built with **Tauri 2**, **React**, **Type
 - Custom dark desktop interface with live transfer activity and speed measurements.
 - Enter HTTP, HTTPS, FTP and magnet links (SFTP is not supported by the current aria2 engine).
 - Import `.torrent`, `.meta4` and `.metalink` files with a native file picker or full path.
+- Torrent file selection dialog with file sizes, per-file progress, tracker URLs and connected peer count (once metadata is available).
 - Segmented HTTP(S) transfers when the server supports range requests (through aria2).
 - Pause/resume/cancel controls and top/bottom priority actions for waiting downloads, subject to protocol/server support.
 - Download history stored locally as JSON, plus aria2's session persistence.
@@ -42,13 +43,13 @@ If you have cloned this private repository previously, use `git pull origin main
 - Downloads: configured directory, initially `~/Downloads`.
 - Settings/history/aria2 session: `~/.local/share/download-manager`.
 - This preview uses an external `aria2c` process. A packaged release must ship or install an engine appropriately.
-- aria2 stops when the desktop app exits. Its session is periodically saved; interrupted jobs should be resumable depending on server and protocol capabilities.
+- On Unix, app exit sends SIGTERM and gives aria2 up to two seconds to save its session; a forced shutdown can still lose progress metadata. Session recovery remains under test.
 
 ## Known limitations
 
-- The new aria2 integration still needs a successful Ubuntu 26.04 build and end-to-end tests. The Linux CI workflow was added, but a passing build has not been confirmed.
+- The new aria2 integration still needs a successful Ubuntu 26.04 build and end-to-end tests. GitHub Actions now runs React/Rust checks and a local-only aria2 RPC transfer smoke test, but passing results have not been confirmed.
 - Some stopped/completed aria2 entries may not resolve after a fresh engine process; persisted history remains visible.
-- Torrent seeding is off by default; set a seeding duration in Settings for newly added torrents. File selection, peer details, tracker management and ratio settings remain future work.
+- Torrent seeding is off by default; set a seeding duration in Settings for newly added torrents. Per-file selection and read-only peer count/tracker details are implemented; editing trackers, peer controls and ratio settings remain future work.
 - No browser extensions, automatic video detection, site grabber, scheduler, checksum verification, tray controls, or installed packages yet.
 - DRM-protected streams are not supported.
 - No automatic link extraction from arbitrary web pages. A stream URL (e.g. a manifest requiring cookies or auth) is not necessarily a direct download.
@@ -93,3 +94,11 @@ The following checks must pass before calling this a release:
 8. Test settings persistence, bad URLs, disk-full errors and missing aria2 gracefully.
 
 These are **pending acceptance tests**, not results already achieved.
+
+## Latest work
+
+- Torrent file selection uses aria2's `getFiles` / `changeOption` RPC methods. At least one file must remain selected; options may cause aria2 to internally restart an active transfer.
+- Peer count and announce tracker URLs are visible when the engine provides metadata. Peer IP addresses are not displayed.
+- Short-lived RPC transport failures no longer automatically mark a job interrupted. This status is reserved for known missing GIDs.
+- Added `tests/test_aria2_rpc.py`, which serves a local file, downloads it through aria2's authenticated RPC and verifies SHA-256; CI runs it on Linux.
+- Successful local/CI execution is still required before declaring these changes stable.
