@@ -9,6 +9,8 @@ use tauri::State;
 struct Download {
     gid: String,
     source: String,
+    #[serde(default)]
+    is_torrent: bool,
     name: String,
     status: String,
     completed_length: u64,
@@ -213,7 +215,7 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
         else if let Some(s) = gid.as_array().and_then(|x| x.first()).and_then(Value::as_str) { s.to_string() }
         else { return Err("aria2 returned an unexpected download ID".into()); };
     let name = input.rsplit('/').next().unwrap_or(input).chars().take(120).collect::<String>();
-    let item = Download { gid, source: input.to_string(), name, status: "waiting".into(), completed_length: 0,
+    let item = Download { gid, source: input.to_string(), is_torrent: input.starts_with("magnet:") || input.to_ascii_lowercase().contains(".torrent"), name, status: "waiting".into(), completed_length: 0,
         total_length: 0, download_speed: 0, upload_speed: 0, path: String::new(), error: None };
     engine.remember(item.clone())?;
     Ok(item)
@@ -247,6 +249,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             }
             let get_num = |key: &str| status.get(key).and_then(Value::as_str).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
             item.status = status.get("status").and_then(Value::as_str).unwrap_or("unknown").to_string();
+            if status.get("bittorrent").is_some() { item.is_torrent = true; }
             item.completed_length = get_num("completedLength");
             item.total_length = get_num("totalLength");
             item.download_speed = get_num("downloadSpeed");
@@ -351,10 +354,8 @@ fn validate_file_selection(selected: &[u32], files: &[TorrentFile]) -> Result<St
 
 #[tauri::command]
 async fn get_torrent_files(engine: State<'_, Engine>, gid: String) -> Result<Vec<TorrentFile>, String> {
-    let item = engine.downloads.lock().map_err(|e| e.to_string())?
-        .get(&gid).cloned().ok_or("Unknown download")?;
-    if !item.source.starts_with("magnet:") && !item.source.to_lowercase().contains(".torrent") {
-        return Err("This download is not a torrent".into());
+    if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
+        return Err("Unknown download".into());
     }
     let status = engine.rpc("tellStatus", vec![json!(gid.clone())]).await?;
     if status.get("bittorrent").is_none() {
@@ -366,9 +367,12 @@ async fn get_torrent_files(engine: State<'_, Engine>, gid: String) -> Result<Vec
 
 #[tauri::command]
 async fn select_torrent_files(engine: State<'_, Engine>, gid: String, indexes: Vec<u32>) -> Result<(), String> {
-    let item = engine.downloads.lock().map_err(|e| e.to_string())?.get(&gid).cloned().ok_or("Unknown download")?;
-    if !item.source.starts_with("magnet:") && !item.source.to_ascii_lowercase().contains(".torrent") {
-        return Err("This download is not a torrent".into());
+    if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
+        return Err("Unknown download".into());
+    }
+    let status = engine.rpc("tellStatus", vec![json!(gid.clone())]).await?;
+    if status.get("bittorrent").is_none() {
+        return Err("Torrent metadata is not available yet".into());
     }
     let response = engine.rpc("getFiles", vec![json!(gid.clone())]).await?;
     let files = parse_torrent_files(&response)?;
@@ -462,7 +466,7 @@ mod tests {
     }
     #[test]
     fn json_round_trip_keeps_download_identifiers() {
-        let item = Download { gid: "abc123".into(), source: "https://example.org/a.zip".into(),
+        let item = Download { gid: "abc123".into(), source: "https://example.org/a.zip".into(), is_torrent: false,
             name: "a.zip".into(), status: "complete".into(), completed_length: 30,
             total_length: 30, download_speed: 0, upload_speed: 0,
             path: "/tmp/a.zip".into(), error: None };
