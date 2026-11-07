@@ -21,6 +21,7 @@ type DownloadItem = {
   error?: string | null;
 };
 type TorrentFile = { index: number; path: string; length: number; completedLength: number; selected: boolean };
+type TorrentInfo = { peers: number; trackers: string[] };
 type Settings = {
   connections: number;
   concurrent: number;
@@ -56,6 +57,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [torrentDialog, setTorrentDialog] = useState<DownloadItem | null>(null);
   const [torrentFiles, setTorrentFiles] = useState<TorrentFile[]>([]);
+  const [torrentInfo, setTorrentInfo] = useState<TorrentInfo | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
   const [torrentError, setTorrentError] = useState("");
   const [torrentBusy, setTorrentBusy] = useState(false);
@@ -108,6 +110,7 @@ export default function App() {
   const showTorrentFiles = async (item: DownloadItem) => {
     setTorrentDialog(item);
     setTorrentFiles([]);
+    setTorrentInfo(null);
     setSelectedFiles([]);
     setTorrentError("");
     setTorrentBusy(true);
@@ -115,6 +118,7 @@ export default function App() {
       const files = await invoke<TorrentFile[]>("get_torrent_files", { gid: item.gid });
       setTorrentFiles(files);
       setSelectedFiles(files.filter(file => file.selected).map(file => file.index));
+      invoke<TorrentInfo>("get_torrent_info", { gid: item.gid }).then(setTorrentInfo).catch(() => {});
     } catch (err) { setTorrentError(String(err)); }
     finally { setTorrentBusy(false); }
   };
@@ -222,6 +226,7 @@ export default function App() {
       <section className="modal torrent-modal" role="dialog" aria-modal="true" aria-label="Torrent file selection">
         <div className="modal-title"><div><Magnet size={22}/><h2>Select torrent files</h2></div><button aria-label="Close file selection" onClick={() => setTorrentDialog(null)}><X size={18}/></button></div>
         <p title={torrentDialog.source}>Choose which files to download in {torrentDialog.name}. Changing file selection can restart the transfer internally.</p>
+        {torrentInfo && <div className="torrent-metadata"><span>Connected peers: <strong>{torrentInfo.peers}</strong></span><span>Trackers: <strong>{torrentInfo.trackers.length}</strong></span>{torrentInfo.trackers.length > 0 && <details><summary>Show trackers</summary><ul>{torrentInfo.trackers.map((tracker, index) => <li key={index}>{tracker}</li>)}</ul></details>}</div>}
         {torrentError && <p className="error" role="alert">{torrentError}</p>}
         {torrentBusy && <p>Loading torrent metadata...</p>}
         {!torrentBusy && torrentFiles.length === 0 && !torrentError && <p>File details are not available yet.</p>}
