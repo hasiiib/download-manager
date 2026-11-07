@@ -368,6 +368,30 @@ async fn get_torrent_files(engine: State<'_, Engine>, gid: String) -> Result<Vec
     parse_torrent_files(&response)
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TorrentInfo {
+    peers: usize,
+    trackers: Vec<String>,
+}
+
+#[tauri::command]
+async fn get_torrent_info(engine: State<'_, Engine>, gid: String) -> Result<TorrentInfo, String> {
+    if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
+        return Err("Unknown download".into());
+    }
+    let status = engine.rpc("tellStatus", vec![json!(gid.clone())]).await?;
+    let bittorrent = status.get("bittorrent").ok_or("Torrent metadata is not available yet")?;
+    let trackers = bittorrent.get("announceList").and_then(Value::as_array)
+        .map(|tiers| tiers.iter().filter_map(Value::as_array)
+            .flat_map(|tier| tier.iter().filter_map(Value::as_str))
+            .map(str::to_string).take(64).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let peers = engine.rpc("getPeers", vec![json!(gid)]).await.ok()
+        .and_then(|v| v.as_array().map(Vec::len)).unwrap_or(0);
+    Ok(TorrentInfo { peers, trackers })
+}
+
 #[tauri::command]
 async fn select_torrent_files(engine: State<'_, Engine>, gid: String, indexes: Vec<u32>) -> Result<(), String> {
     if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
@@ -490,7 +514,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, list_downloads, control_download, move_queued_download, get_torrent_files, select_torrent_files, forget_download, get_settings, save_settings
+            add_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Download Manager");
