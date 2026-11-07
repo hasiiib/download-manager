@@ -10,6 +10,7 @@ import {
 type DownloadItem = {
   gid: string;
   source: string;
+  isTorrent: boolean;
   name: string;
   status: string;
   completedLength: number;
@@ -30,13 +31,13 @@ type Settings = {
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "" };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
-const isTorrent = (s: string) => s.startsWith("magnet:") || /\.(torrent)(\?|$)/i.test(s);
+const isTorrent = (item: DownloadItem) => item.isTorrent || item.source.startsWith("magnet:") || /\.(torrent)(\?|$)/i.test(item.source);
 const activeState = (s: string) => ["active", "waiting", "paused"].includes(s);
 const filtered = (d: DownloadItem, filter: Filter) => filter === "all" ||
   (filter === "active" && activeState(d.status)) ||
   (filter === "complete" && d.status === "complete") ||
   (filter === "error" && ["error", "removed"].includes(d.status)) ||
-  (filter === "torrent" && isTorrent(d.source));
+  (filter === "torrent" && isTorrent(d));
 
 function StatusIcon({ status }: { status: string }) {
   if (status === "complete") return <CheckCircle2 size={13} />;
@@ -175,7 +176,7 @@ export default function App() {
       <button className={filter === "all" ? "nav active" : "nav"} onClick={() => setFilter("all")}><HardDrive size={18} /> All downloads <b>{items.length}</b></button>
       <button className={filter === "active" ? "nav active" : "nav"} onClick={() => setFilter("active")}><Download size={18} /> In progress <b>{items.filter(d => activeState(d.status)).length}</b></button>
       <button className={filter === "complete" ? "nav active" : "nav"} onClick={() => setFilter("complete")}><CheckCircle2 size={18} /> Completed <b>{done}</b></button>
-      <button className={filter === "torrent" ? "nav active" : "nav"} onClick={() => setFilter("torrent")}><Magnet size={18} /> Torrents <b>{items.filter(d => isTorrent(d.source)).length}</b></button>
+      <button className={filter === "torrent" ? "nav active" : "nav"} onClick={() => setFilter("torrent")}><Magnet size={18} /> Torrents <b>{items.filter(d => isTorrent(d)).length}</b></button>
       <button className={filter === "error" ? "nav active" : "nav"} onClick={() => setFilter("error")}><XCircle size={18} /> Failed</button>
       <div className="nav-label nav-label-secondary">PREFERENCES</div>
       <button className="nav" onClick={() => { setDraft(settings); setSettingsError(""); setSettingsOpen(true); }}><Settings2 size={18} /> Settings</button>
@@ -199,13 +200,13 @@ export default function App() {
       <section className="list"><div className="list-head"><div><h2>Download activity</h2><p>Pause, resume and monitor active transfers</p></div><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>No downloads here yet</h3><p>Add a URL, magnet link or torrent to get started.</p></div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
-            <div className="file-icon">{isTorrent(item.source) ? <Magnet size={20}/> : <Download size={20}/>}</div>
+            <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
             <div className="file-info"><strong title={item.source}>{item.name}</strong><small title={item.error || item.path || item.source}>{item.error || item.path || item.source}</small><div className="progress"><span style={{ width: item.status === "complete" ? "100%" : item.totalLength ? Math.min(100, item.completedLength / item.totalLength * 100) + "%" : "0%" }} /></div></div>
             <div className="row-meta"><span className={"status " + item.status}><StatusIcon status={item.status}/> {item.status}</span>
               <small>{formatSize(item.completedLength)}{item.totalLength ? " / " + formatSize(item.totalLength) : ""}</small>
               {item.status === "active" && <small>{formatSize(item.downloadSpeed)}/s</small>}</div>
             <div className="row-actions">
-              {isTorrent(item.source) && item.status !== "removed" && <button title="Choose files in torrent" aria-label={"Torrent files " + item.name} onClick={() => void showTorrentFiles(item)}><FolderOpen size={17}/></button>}
+              {isTorrent(item) && item.status !== "removed" && <button title="Choose files in torrent" aria-label={"Torrent files " + item.name} onClick={() => void showTorrentFiles(item)}><FolderOpen size={17}/></button>}
               {item.status === "waiting" && <><button title="Move to top of queue" aria-label={"Prioritize " + item.name} onClick={() => void moveQueue(item.gid, "top")}><ArrowUpToLine size={17}/></button><button title="Move to bottom of queue" aria-label={"Deprioritize " + item.name} onClick={() => void moveQueue(item.gid, "bottom")}><QueueBottomIcon size={17}/></button></>}
               {["active", "waiting"].includes(item.status) && <button title="Pause" aria-label={"Pause " + item.name} onClick={() => void control(item.gid, "pause")}><Pause size={17}/></button>}
               {item.status === "paused" && <button title="Resume" aria-label={"Resume " + item.name} onClick={() => void control(item.gid, "resume")}><Play size={17}/></button>}
