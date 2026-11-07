@@ -12,7 +12,7 @@ A Linux-first desktop download manager built with **Tauri 2**, **React**, **Type
 - Segmented HTTP(S) transfers when the server supports range requests (through aria2).
 - Pause/resume/cancel controls, subject to protocol/server support.
 - Download history stored locally as JSON, plus aria2's session persistence.
-- Settings: connections per server (1–16), concurrent downloads (1–10), overall speed limit, target directory.
+- Settings: connections per server (1–16), concurrent downloads (1–10), overall speed limit, target directory and optional torrent seeding time.
 - Transfer status filters and filename/source search.
 - aria2 RPC bound to localhost with a random per-launch authentication token.
 
@@ -46,9 +46,9 @@ If you have cloned this private repository previously, use `git pull origin main
 
 ## Known limitations
 
-- Not yet verified by a successful Ubuntu 26.04 build of the new aria2 integration.
+- The new aria2 integration still needs a successful Ubuntu 26.04 build and end-to-end tests. The Linux CI workflow was added, but a passing build has not been confirmed.
 - Some stopped/completed aria2 entries may not resolve after a fresh engine process; persisted history remains visible.
-- Torrent seeding is disabled for now (`--seed-time=0`); file selection, peer details, tracker management and ratio settings remain future work.
+- Torrent seeding is off by default; set a seeding duration in Settings for newly added torrents. File selection, peer details, tracker management and ratio settings remain future work.
 - No browser extensions, automatic video detection, site grabber, scheduler, checksum verification, tray controls, or installed packages yet.
 - DRM-protected streams are not supported.
 - No automatic link extraction from arbitrary web pages. A stream URL (e.g. a manifest requiring cookies or auth) is not necessarily a direct download.
@@ -70,3 +70,11 @@ IDM's public feature documentation is used only as a functional reference. This 
 ## Licensing
 
 No license has yet been selected for this application. Review library and engine licenses before any distribution.
+
+## Recent reliability fixes
+
+- Replaced the malformed embedded application icon with a valid PNG.
+- Added actionable error when the system cannot launch `aria2c`.
+- Persisted cancellation, marked stale jobs interrupted, and added retry controls.
+- Reduced disk writes when progress has not changed and avoided retrying non-idempotent RPC calls after ambiguous transport errors.
+- Added Rust unit tests for settings limits and download serialization.
