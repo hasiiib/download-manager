@@ -23,10 +23,11 @@ type Settings = {
   connections: number;
   concurrent: number;
   speedLimitKib: number;
+  seedMinutes: number;
   downloadDir: string;
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
-const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, downloadDir: "" };
+const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "" };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
 const isTorrent = (s: string) => s.startsWith("magnet:") || /\.(torrent)(\?|$)/i.test(s);
 const activeState = (s: string) => ["active", "waiting", "paused"].includes(s);
@@ -118,7 +119,7 @@ export default function App() {
     setWorking(true);
     setSettingsError("");
     try {
-      await invoke("save_settings", { settings: { ...draft, connections: Number(draft.connections), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib) } });
+      await invoke("save_settings", { settings: { ...draft, connections: Number(draft.connections), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib), seedMinutes: Number(draft.seedMinutes) } });
       setSettings(draft); setSettingsOpen(false);
     } catch (err) { setSettingsError(String(err)); }
     finally { setWorking(false); }
@@ -183,6 +184,7 @@ export default function App() {
         <label><span><Zap size={16}/> Connections per server</span><input type="number" min="1" max="16" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
         <label><span><Download size={16}/> Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
         <label><span><Activity size={16}/> Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
+        <label><span><Magnet size={16}/> Torrent seeding time (minutes, 0 = off)</span><input type="number" min="0" max="65535" value={draft.seedMinutes} onChange={e => setDraft(s => ({ ...s, seedMinutes: Number(e.target.value) }))}/></label>
         <label><span><FolderOpen size={16}/> Download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
         {settingsError && <p className="error" role="alert">{settingsError}</p>}
         <div className="modal-actions"><button onClick={() => setSettingsOpen(false)}>Cancel</button><button disabled={working} onClick={() => void save()}>Save settings</button></div>
