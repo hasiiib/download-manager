@@ -25,13 +25,15 @@ struct Settings {
     connections: u8,
     concurrent: u8,
     speed_limit_kib: u64,
+    #[serde(default)]
+    seed_minutes: u16,
     download_dir: String,
 }
 
 impl Settings {
     fn defaults() -> Self {
         let folder = home().join("Downloads");
-        Self { connections: 8, concurrent: 3, speed_limit_kib: 0, download_dir: folder.to_string_lossy().into_owned() }
+        Self { connections: 8, concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned() }
     }
     fn validate(&self) -> Result<(), String> {
         if !(1..=16).contains(&self.connections) { return Err("Connections must be 1–16".into()); }
@@ -176,6 +178,7 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
         "split": settings.connections.to_string(),
         "max-connection-per-server": settings.connections.to_string(),
         "continue": "true",
+        "seed-time": settings.seed_minutes.to_string(),
     });
     let gid = if input.starts_with("magnet:?") {
         engine.rpc("addUri", vec![json!([input]), opts]).await?
