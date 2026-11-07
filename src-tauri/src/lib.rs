@@ -200,8 +200,28 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
 async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, String> {
     let snapshot: Vec<Download> = engine.downloads.lock().map_err(|e| e.to_string())?.values().cloned().collect();
     let mut updated = Vec::with_capacity(snapshot.len());
+    let mut discovered = Vec::new();
     for mut item in snapshot {
         if let Ok(status) = engine.rpc("tellStatus", vec![json!(item.gid)]).await {
+            // aria2 creates a follow-up GID after retrieving magnet/torrent metadata.
+            // Track it separately so the actual payload remains visible and controllable.
+            if let Some(children) = status.get("followedBy").and_then(Value::as_array) {
+                for next in children.iter().filter_map(Value::as_str) {
+                    if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(next)
+                        && !discovered.iter().any(|d: &Download| d.gid == next) {
+                        let mut child = item.clone();
+                        child.gid = next.to_string();
+                        child.status = "waiting".into();
+                        child.completed_length = 0;
+                        child.total_length = 0;
+                        child.download_speed = 0;
+                        child.upload_speed = 0;
+                        child.path.clear();
+                        child.error = None;
+                        discovered.push(child);
+                    }
+                }
+            }
             let get_num = |key: &str| status.get(key).and_then(Value::as_str).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
             item.status = status.get("status").and_then(Value::as_str).unwrap_or("unknown").to_string();
             item.completed_length = get_num("completedLength");
@@ -223,6 +243,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
         }
         updated.push(item);
     }
+    updated.extend(discovered);
     updated.reverse();
     // Store completed state and filenames for display after restarting the application.
     if let Ok(mut entries) = engine.downloads.lock() {
