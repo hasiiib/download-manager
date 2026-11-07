@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Activity, ArrowDownToLine, CheckCircle2, Clock3, Download, FolderOpen, HardDrive,
   Link2, Magnet, Pause, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal,
@@ -69,6 +70,20 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
+  const pickTorrent = async () => {
+    try {
+      const file = await open({ multiple: false, directory: false, filters: [{ name: "Torrent or Metalink", extensions: ["torrent", "meta4", "metalink"] }] });
+      if (typeof file === "string") setUrl(file);
+    } catch (err) { setMessage(String(err)); }
+  };
+
+  const pickDirectory = async () => {
+    try {
+      const folder = await open({ multiple: false, directory: true });
+      if (typeof folder === "string") setDraft(s => ({ ...s, downloadDir: folder }));
+    } catch (err) { setMessage(String(err)); }
+  };
+
   const add = async () => {
     if (!url.trim()) { setMessage("Paste a URL, magnet link or full path to a .torrent/.meta4 file."); return; }
     setMessage("");
@@ -130,7 +145,7 @@ export default function App() {
         <div className="stat stat-speed"><div className="stat-icon violet"><Zap size={21}/></div><div><small>Total download speed</small><strong>{formatSize(speed)}/s</strong></div></div>
       </section>
       <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · SFTP · MAGNET · TORRENT · METALINK</span></div>
-        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div>
+        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button></div>
         {message && <p className="error" role="alert">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
@@ -160,7 +175,7 @@ export default function App() {
         <label><span><Zap size={16}/> Connections per server</span><input type="number" min="1" max="16" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
         <label><span><Download size={16}/> Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
         <label><span><Activity size={16}/> Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
-        <label><span><FolderOpen size={16}/> Download directory</span><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/></label>
+        <label><span><FolderOpen size={16}/> Download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
         <div className="modal-actions"><button onClick={() => setSettingsOpen(false)}>Cancel</button><button disabled={working} onClick={() => void save()}>Save settings</button></div>
       </section>
     </div>}
