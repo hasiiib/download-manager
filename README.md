@@ -7,10 +7,10 @@ A Linux-first desktop download manager built with **Tauri 2**, **React**, **Type
 ## Features available in the code
 
 - Custom dark desktop interface with live transfer activity and speed measurements.
-- Enter HTTP, HTTPS, FTP, SFTP and magnet links.
+- Enter HTTP, HTTPS, FTP and magnet links (SFTP is not supported by the current aria2 engine).
 - Import `.torrent`, `.meta4` and `.metalink` files with a native file picker or full path.
 - Segmented HTTP(S) transfers when the server supports range requests (through aria2).
-- Pause/resume/cancel controls, subject to protocol/server support.
+- Pause/resume/cancel controls and top/bottom priority actions for waiting downloads, subject to protocol/server support.
 - Download history stored locally as JSON, plus aria2's session persistence.
 - Settings: connections per server (1–16), concurrent downloads (1–10), overall speed limit, target directory and optional torrent seeding time.
 - Transfer status filters and filename/source search.
@@ -78,3 +78,18 @@ No license has yet been selected for this application. Review library and engine
 - Persisted cancellation, marked stale jobs interrupted, and added retry controls.
 - Reduced disk writes when progress has not changed and avoided retrying non-idempotent RPC calls after ambiguous transport errors.
 - Added Rust unit tests for settings limits and download serialization.
+
+## Ubuntu preview QA checklist
+
+The following checks must pass before calling this a release:
+
+1. Run `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, and `cargo test --manifest-path src-tauri/Cargo.toml` successfully.
+2. Launch `npm run tauri dev` on Ubuntu 26.04 with `aria2c` available in PATH.
+3. Download a small HTTPS file and verify its final bytes/checksum outside the app.
+4. Test pause/resume on a server that supports HTTP Range; ensure its final checksum matches.
+5. Import a local legal test torrent and a magnet link; verify metadata and payload progress.
+6. Restart while a download is in progress and verify session recovery. This remains a known risk.
+7. Confirm queue priority, cancel, and no duplicate entries after torrent metadata resolution.
+8. Test settings persistence, bad URLs, disk-full errors and missing aria2 gracefully.
+
+These are **pending acceptance tests**, not results already achieved.
