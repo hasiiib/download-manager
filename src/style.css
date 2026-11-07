@@ -28,3 +28,5 @@
 .modal-actions button:last-child{background:#8068ea;border-color:#8068ea}
 @media(max-width:1200px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:950px){.row{flex-wrap:wrap}.row-actions{margin-left:auto}.section-title{gap:12px}}
+
+.picker-row{display:flex;justify-content:flex-start;margin-top:11px}.picker-row button{display:flex;align-items:center;gap:8px;background:transparent;border:1px solid #3b3955;border-radius:8px;padding:9px 11px;color:#c4b7ed;font-weight:700;font-size:11px}.picker-row button:hover{background:#262544}.folder-row{display:flex;gap:8px}.folder-row input{flex:1;min-width:0}.folder-row button{background:#2b3151;color:#eceaff;border:1px solid #454e72;border-radius:9px;padding:0 12px;cursor:pointer}.folder-row button:hover{background:#3c466e}
