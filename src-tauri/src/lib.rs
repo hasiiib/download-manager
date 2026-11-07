@@ -163,6 +163,16 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         if let Ok(mut child) = self.child.lock() {
+            // On Linux/macOS, SIGTERM lets aria2 persist its session on shutdown.
+            // After a short grace period, force-kill to avoid hanging app exit.
+            #[cfg(unix)]
+            {
+                let _ = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+                for _ in 0..20 {
+                    if let Ok(Some(_)) = child.try_wait() { return; }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
             let _ = child.kill();
             let _ = child.wait();
         }
