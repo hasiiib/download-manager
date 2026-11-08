@@ -189,3 +189,12 @@ Until the workflow reports a successful run and the resulting installer is teste
 - A new configuration regression test (`tests/test_project_config.py`) validates the icon key, package dependency, and consistent versions before the expensive build.
 
 **Verification:** No passing GitHub Actions result has been observed for this change. The installer is not yet a verified downloadable release.
+
+## Installer CI fixes
+
+- Fixed a guaranteed failing configuration test: the icon build script uses `dir.join("icon.png")`, not `folder.join(...)`.
+- Added a dependency-free `scripts/generate_icon.py` step **before** Tauri CLI invokes Rust or validates icon assets. The Rust build script still regenerates the preview icon during compilation.
+- Both Linux CI and `bash scripts/validate-linux.sh` generate the icon before building.
+- Configuration tests now validate PNG signature, dimensions (64×64 RGBA), chunk order and CRC checksums to catch corrupt generated icons early.
+
+This only verifies the icon-generation logic and configuration in source. A full successful Ubuntu build and installer installation test remain outstanding.
