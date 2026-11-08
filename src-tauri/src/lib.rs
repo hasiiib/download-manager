@@ -194,7 +194,7 @@ fn save_json<T: Serialize + serde::de::DeserializeOwned>(path: &std::path::Path,
 }
 
 impl Engine {
-    fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    fn start() -> Result<Self, Box<dyn std::error::Error>> {
         let data_dir = home().join(".local").join("share").join("download-manager");
         fs::create_dir_all(&data_dir)?;
         // URLs and torrent metadata can include private credentials; keep
