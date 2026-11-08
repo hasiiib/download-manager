@@ -157,4 +157,4 @@ Run all integration tests on an Ubuntu machine with aria2 installed:
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-The Linux CI workflow also offers a manual `workflow_dispatch` trigger and executes the same suite after TypeScript and Rust checks. **These are committed tests, not proof they have passed.** A confirmed passing GitHub Actions run and actual desktop testing remain necessary. The current test verifies in-process pause/resume, while partial-file recovery across a full process restart still needs a dedicated test.
+The Linux CI workflow also offers a manual `workflow_dispatch` trigger and executes the same suite after TypeScript and Rust checks. **These are committed tests, not proof they have passed.** A confirmed passing GitHub Actions run and actual desktop testing remain necessary. The suite now also includes `tests/test_aria2_restart_resume.py`: it pauses a partially downloaded local file, saves the aria2 session, completely restarts the engine, resumes the same GID, and compares the final file SHA-256. This test has been committed but a passing run has not yet been confirmed.
