@@ -272,3 +272,9 @@ sha256sum -c SHA256SUMS
 This checksum protects against accidental corruption after build; it is not a digital signature and does not independently establish publisher authenticity. The package is still experimental, and no green end-to-end Ubuntu build or installation has been confirmed.
 
 **Build reproducibility gap:** the repository currently does not track `package-lock.json` or `src-tauri/Cargo.lock`. Those files should be generated and committed with the exact resolved dependencies before a release, allowing `npm ci` and locked Cargo builds.
+
+## Dependency lockfile preparation
+
+The Linux workflow now archives the dependency lockfiles resolved by npm and Cargo (`package-lock.json` and `src-tauri/Cargo.lock`) as a separate `build-dependency-lockfiles` artifact when the build reaches those stages. This allows maintainers to review the exact versions used in CI and commit them for reproducible future builds. The artifact is for review; committing audited lockfiles and switching to `npm ci` / `cargo --locked` remain future release gates.
+
+The Debian payload verifier also fixes regex escaping for expected package versions and `aria2` dependencies. Basic version/dependency regex cases were checked locally, but this does not establish a full `.deb` build or passing GitHub Actions run. This environment could not reach the npm registry to generate a reliable lockfile, so no manually invented or unverified dependency lock was committed.
