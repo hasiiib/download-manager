@@ -33,17 +33,26 @@ struct Settings {
     #[serde(default)]
     seed_minutes: u16,
     download_dir: String,
+    #[serde(default = "default_refresh_seconds")]
+    refresh_seconds: u8,
+    #[serde(default = "default_low_memory_mode")]
+    low_memory_mode: bool,
 }
+
+fn default_refresh_seconds() -> u8 { 3 }
+fn default_low_memory_mode() -> bool { true }
 
 impl Settings {
     fn defaults() -> Self {
         let folder = home().join("Downloads");
-        Self { connections: 8, concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned() }
+        Self { connections: 8, concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned(),
+            refresh_seconds: default_refresh_seconds(), low_memory_mode: default_low_memory_mode() }
     }
     fn validate(&self) -> Result<(), String> {
         if !(1..=16).contains(&self.connections) { return Err("Connections must be 1–16".into()); }
         if !(1..=10).contains(&self.concurrent) { return Err("Concurrent downloads must be 1–10".into()); }
         if self.download_dir.trim().is_empty() { return Err("Download folder cannot be empty".into()); }
+        if !(1..=30).contains(&self.refresh_seconds) { return Err("Refresh interval must be 1–30 seconds".into()); }
         if self.speed_limit_kib > 1_048_576 { return Err("Speed limit must be no more than 1048576 KiB/s".into()); }
         Ok(())
     }
@@ -879,6 +888,11 @@ mod tests {
         settings.concurrent = 3;
         settings.speed_limit_kib = 1_048_577;
         assert!(settings.validate().is_err());
+        settings.speed_limit_kib = 0;
+        settings.refresh_seconds = 0;
+        assert!(settings.validate().is_err());
+        settings.refresh_seconds = 30;
+        assert!(settings.validate().is_ok());
     }
     #[test]
     fn history_checkpoint_prioritizes_state_changes_over_speed_updates() {
