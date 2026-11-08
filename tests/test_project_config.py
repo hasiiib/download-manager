@@ -53,6 +53,10 @@ class TestProjectConfiguration(unittest.TestCase):
         self.assertEqual(offset, len(raw))
         self.assertEqual(found, [b"IHDR", b"IDAT", b"IEND"])
 
+    def test_local_tauri_command_prepares_icon(self):
+        self.assertIn("generate_icon.py", self.frontend["scripts"].get("pretauri", ""))
+        self.assertIn("tauri", self.frontend["scripts"])
+
     def test_ubuntu_installer_requires_aria2(self):
         self.assertIn("aria2", self.tauri["bundle"]["linux"]["deb"]["depends"])
         self.assertTrue(self.tauri["bundle"]["active"])
