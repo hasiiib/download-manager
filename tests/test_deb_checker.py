@@ -18,14 +18,14 @@ EXPECTED = [
 
 
 class TestDebChecker(unittest.TestCase):
-    def check(self, paths=EXPECTED, dependencies="libc6 (>= 2.34), aria2, libgtk-3-0"):
+    def check(self, paths=EXPECTED, dependencies="libc6 (>= 2.34), aria2, libgtk-3-0", version="0.2.0-1", package="download-manager"):
         with tempfile.TemporaryDirectory() as tmp:
             filename = pathlib.Path(tmp) / "app.deb"
             filename.write_bytes(b"test fixture")
             def fake_field(_package, field):
                 return {
-                    "Package": "download-manager",
-                    "Version": "0.2.0-1",
+                    "Package": package,
+                    "Version": version,
                     "Depends": dependencies,
                 }[field]
             with patch.object(checker, "field", side_effect=fake_field):
@@ -34,6 +34,14 @@ class TestDebChecker(unittest.TestCase):
 
     def test_valid_package(self):
         self.check()
+
+    def test_wrong_package_version_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unexpected package version"):
+            self.check(version="9.9.9-1")
+
+    def test_wrong_package_name_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unexpected package name"):
+            self.check(package="different-app")
 
     def test_missing_aria2_dependency(self):
         with self.assertRaisesRegex(ValueError, "aria2 dependency"):
