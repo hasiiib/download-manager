@@ -28,9 +28,12 @@ type Settings = {
   speedLimitKib: number;
   seedMinutes: number;
   downloadDir: string;
+  refreshSeconds: number;
+  lowMemoryMode: boolean;
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
-const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "" };
+type SettingsTab = "general" | "connection" | "save" | "downloads" | "integration" | "privacy";
+const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
 const formatEta = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return "Calculating...";
@@ -65,6 +68,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaults);
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [torrentDialog, setTorrentDialog] = useState<DownloadItem | null>(null);
   const [torrentFiles, setTorrentFiles] = useState<TorrentFile[]>([]);
   const [torrentInfo, setTorrentInfo] = useState<TorrentInfo | null>(null);
@@ -107,10 +111,13 @@ export default function App() {
       }
     };
     void check();
-    const timer = window.setInterval(() => void refresh(), 1500);
+    const intervalMs = Math.max(1000, Math.min(30000, settings.refreshSeconds * 1000));
+    const timer = window.setInterval(() => {
+      if (!settings.lowMemoryMode || !document.hidden) void refresh();
+    }, intervalMs);
     const healthTimer = window.setInterval(() => void check(), 10000);
     return () => { mounted = false; window.clearInterval(timer); window.clearInterval(healthTimer); };
-  }, [refresh]);
+  }, [refresh, settings.refreshSeconds, settings.lowMemoryMode]);
 
   const pickTorrent = async () => {
     try {
@@ -132,6 +139,9 @@ export default function App() {
     setWorking(true);
     try {
       await invoke("add_download", { source: url.trim() });
+      setFilter("all");
+      setQuery("");
+      setMessage("Download added. Showing all downloads.");
       setUrl("");
       await refresh();
     } catch (err) { setMessage(String(err)); }
@@ -149,6 +159,7 @@ export default function App() {
     try {
       const result = await invoke<{ added: number; errors: string[] }>("add_batch", { sources });
       await refresh();
+      if (result.added > 0) { setFilter("all"); setQuery(""); }
       if (result.errors.length) {
         setBatchError(result.added + " added. " + result.errors.join(" | "));
       } else {
@@ -256,7 +267,7 @@ export default function App() {
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
       </section>
       <section className="list"><div className="list-head"><div><h2>Download activity</h2><p>Pause, resume and monitor active transfers</p></div><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
-        {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>No downloads here yet</h3><p>Add a URL, magnet link or torrent to get started.</p></div> :
+        {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{filter === "all" && !query ? "No downloads here yet" : "No downloads match this view"}</h3><p>{filter === "all" && !query ? "Add a URL, magnet link or torrent to get started." : "Downloads may be hidden by the selected filter or search."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
             <div className="file-info"><strong title={item.source}>{item.name}</strong><small title={item.error || item.path || item.source}>{item.error || item.path || item.source}</small><div className="progress"><span style={{ width: item.status === "complete" ? "100%" : item.totalLength ? Math.min(100, item.completedLength / item.totalLength * 100) + "%" : "0%" }} /></div></div>
