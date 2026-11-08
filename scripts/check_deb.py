@@ -27,10 +27,10 @@ def package_paths(package: pathlib.Path) -> list[str]:
         try:
             with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
                 paths = [member.name.removeprefix("./").lstrip("/") for member in archive]
-        except (tarfile.TarError, OSError):
+        except (tarfile.TarError, OSError) as error:
             process.kill()
             process.communicate()
-            raise
+            raise ValueError(f"Cannot read Debian archive {package}: {error}") from error
         error_output = process.stderr.read()
         if process.wait() != 0:
             raise ValueError(
