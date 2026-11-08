@@ -50,6 +50,16 @@ jobs:
         run: python3 -m unittest discover -s tests -p "test_aria2_restart_resume.py" -v
       - name: Build Ubuntu Debian installer
         run: npx tauri build --bundles deb
+      - name: Verify Debian package metadata and aria2 dependency
+        run: |
+          shopt -s nullglob
+          packages=(src-tauri/target/release/bundle/deb/*.deb)
+          if (( ${#packages[@]} != 1 )); then
+            echo "Expected exactly one Debian installer; found ${#packages[@]}"
+            exit 1
+          fi
+          dpkg-deb --info "${packages[0]}"
+          dpkg-deb --field "${packages[0]}" Depends | grep -Eq '(^|[, ])aria2([, ]|$)'
       - name: Upload Debian installer
         uses: actions/upload-artifact@v4
         with:
