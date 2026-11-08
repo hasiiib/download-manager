@@ -1,6 +1,8 @@
 """Unit tests for offline Debian installer verification."""
 import importlib.util
 import pathlib
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -31,6 +33,35 @@ class TestDebChecker(unittest.TestCase):
             with patch.object(checker, "field", side_effect=fake_field):
                 with patch.object(checker, "package_paths", return_value=paths):
                     checker.validate(filename)
+
+    @unittest.skipUnless(shutil.which("dpkg-deb"), "dpkg-deb is required")
+    def test_real_debian_archive_inspection(self):
+        # Build a tiny local package so tar extraction and Debian metadata
+        # parsing are tested without mocking any checker internals.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            package_root = root / "package"
+            control = package_root / "DEBIAN" / "control"
+            control.parent.mkdir(parents=True)
+            control.write_text(
+                "Package: download-manager\\n"
+                "Version: 0.2.0-1\\n"
+                "Architecture: all\\n"
+                "Maintainer: QA <qa@example.invalid>\\n"
+                "Depends: aria2\\n"
+                "Description: Offline Debian archive smoke test\\n",
+                encoding="utf-8",
+            )
+            for name in EXPECTED:
+                path = package_root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"local fixture")
+            archive = root / "sample.deb"
+            subprocess.run(
+                ["dpkg-deb", "--build", str(package_root), str(archive)],
+                check=True, stdout=subprocess.DEVNULL,
+            )
+            checker.validate(archive)
 
     def test_valid_package(self):
         self.check()
