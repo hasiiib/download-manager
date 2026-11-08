@@ -15,13 +15,29 @@ def field(package: pathlib.Path, name: str) -> str:
 
 
 def package_paths(package: pathlib.Path) -> list[str]:
-    listing = subprocess.check_output(
-        ["dpkg-deb", "--fsys-tarfile", str(package)],
-    )
-    import io
+    # Stream the uncompressed tar from dpkg-deb instead of buffering the
+    # entire installer in RAM. Large app bundles can be hundreds of MB.
     import tarfile
-    with tarfile.open(fileobj=io.BytesIO(listing), mode="r:") as archive:
-        return [member.name.removeprefix("./").lstrip("/") for member in archive]
+    with subprocess.Popen(
+        ["dpkg-deb", "--fsys-tarfile", str(package)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    ) as process:
+        assert process.stdout is not None
+        assert process.stderr is not None
+        try:
+            with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
+                paths = [member.name.removeprefix("./").lstrip("/") for member in archive]
+        except (tarfile.TarError, OSError):
+            process.kill()
+            process.communicate()
+            raise
+        error_output = process.stderr.read()
+        if process.wait() != 0:
+            raise ValueError(
+                "Unable to inspect Debian archive: "
+                + error_output.decode("utf-8", errors="replace").strip()
+            )
+    return paths
 
 
 def validate(package: pathlib.Path) -> None:
