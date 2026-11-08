@@ -95,6 +95,9 @@ impl Engine {
         let port = listener.local_addr()?.port();
         drop(listener);
         let token = uuid::Uuid::new_v4().to_string();
+        // Construct fallible dependencies before spawning aria2. Otherwise a
+        // TLS/client initialization error could leave an unmanaged child alive.
+        let client = reqwest::Client::builder().no_proxy().build()?;
         let child = Command::new("aria2c")
             .arg("--no-conf=true")
             .arg("--enable-rpc=true")
@@ -121,9 +124,7 @@ impl Engine {
             .spawn().map_err(|error| std::io::Error::new(error.kind(),
                 format!("Could not start aria2c ({error}). Install it with: sudo apt install aria2")))?;
         Ok(Self {
-            // This client only speaks to our loopback aria2 RPC endpoint. Ignore
-            // HTTP_PROXY/HTTPS_PROXY environment variables for local control traffic.
-            client: reqwest::Client::builder().no_proxy().build()?,
+            client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
             settings: Mutex::new(settings), data_dir,
