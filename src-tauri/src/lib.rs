@@ -401,9 +401,13 @@ async fn retry_download(engine: State<'_, Engine>, gid: String) -> Result<Downlo
     // second transfer if the engine has recovered the original download.
     match engine.rpc("tellStatus", vec![json!(gid.clone())]).await {
         Ok(status) => {
-            if matches!(status.get("status").and_then(Value::as_str),
-                Some("active" | "waiting" | "paused")) {
-                return Err("The original transfer is still in the engine; resume it instead".into());
+            match status.get("status").and_then(Value::as_str) {
+                Some("active" | "waiting" | "paused") =>
+                    return Err("The original transfer is still in the engine; resume it instead".into()),
+                Some("complete") =>
+                    return Err("The original download already completed; refresh the list".into()),
+                Some("error" | "removed") => {}
+                _ => return Err("Cannot safely retry: aria2 reported an unknown transfer state".into()),
             }
         }
         Err(error) if is_missing_gid_error(&error) => {
