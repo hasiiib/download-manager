@@ -208,3 +208,12 @@ This only verifies the icon-generation logic and configuration in source. A full
 - The icon-generator algorithm was checked in isolation and its 64×64 RGBA PNG parsed successfully. This does **not** establish that the full app or installer builds.
 
 **Outstanding:** A green Ubuntu GitHub Actions run, installation on Ubuntu 26.04, and a full desktop download/resume smoke test.
+
+## History polling and retry guard improvements
+
+- Completed, removed and failed history records are now served from local history rather than each generating an aria2 status RPC request every 1.5 seconds. Active, waiting, paused and interrupted jobs are still checked against the engine.
+- Retry checks now reject already-complete transfers and unrecognized aria2 states, in addition to running or paused transfers, to reduce duplicate downloads.
+- The partial-file restart integration test only sends `unpause` when aria2 actually reports a paused transfer; restored waiting transfers are allowed to run naturally.
+- Added Rust unit coverage for the distinction between live and historical status polling.
+
+The changes above have been committed, but the Linux CI connector has not provided a passing build result. The app remains a development preview.
