@@ -782,10 +782,10 @@ mod tests {
         fs::create_dir_all(&folder).unwrap();
         let path = folder.join("history.json");
         let mut first = BTreeMap::new();
-        first.insert("old", 1_u32);
+        first.insert("old".to_string(), 1_u32);
         save_json(&path, &first).unwrap();
         let mut second = BTreeMap::new();
-        second.insert("new", 2_u32);
+        second.insert("new".to_string(), 2_u32);
         save_json(&path, &second).unwrap();
         assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap().unwrap(), second);
         assert_eq!(load_json::<BTreeMap<String, u32>>(&path.with_extension("bak"))
