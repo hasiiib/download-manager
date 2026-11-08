@@ -50,6 +50,9 @@ function StatusIcon({ status }: { status: string }) {
 export default function App() {
   const [items, setItems] = useState<DownloadItem[]>([]);
   const [url, setUrl] = useState("");
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchText, setBatchText] = useState("");
+  const [batchError, setBatchError] = useState("");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [settings, setSettings] = useState<Settings>(defaults);
@@ -104,6 +107,28 @@ export default function App() {
       setUrl("");
       await refresh();
     } catch (err) { setMessage(String(err)); }
+    finally { setWorking(false); }
+  };
+
+  const addBatch = async () => {
+    const sources = batchText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (sources.length === 0 || sources.length > 50) {
+      setBatchError("Enter between 1 and 50 links, one per line.");
+      return;
+    }
+    setWorking(true);
+    setBatchError("");
+    try {
+      const result = await invoke<{ added: number; errors: string[] }>("add_batch", { sources });
+      await refresh();
+      if (result.errors.length) {
+        setBatchError(result.added + " added. " + result.errors.join(" | "));
+      } else {
+        setBatchOpen(false);
+        setBatchText("");
+        setMessage(result.added + " downloads queued.");
+      }
+    } catch (err) { setBatchError(String(err)); }
     finally { setWorking(false); }
   };
 
@@ -196,7 +221,7 @@ export default function App() {
         <div className="stat stat-speed"><div className="stat-icon violet"><Zap size={21}/></div><div><small>Total download speed</small><strong>{formatSize(speed)}/s</strong></div></div>
       </section>
       <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · MAGNET · TORRENT · METALINK</span></div>
-        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button></div>
+        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
         {message && <p className="error" role="alert">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
@@ -222,6 +247,15 @@ export default function App() {
       </section>
       <footer><span><SlidersHorizontal size={15}/> Parallel connections, torrents and magnet links powered by aria2.</span><span>LINUX FIRST · CROSS-PLATFORM ROADMAP</span></footer>
     </main>
+    {batchOpen && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setBatchOpen(false); }}>
+      <section className="modal batch-modal" role="dialog" aria-modal="true" aria-label="Add multiple downloads">
+        <div className="modal-title"><div><Link2 size={22}/><h2>Batch downloads</h2></div><button aria-label="Close batch downloads" onClick={() => setBatchOpen(false)}><X size={18}/></button></div>
+        <p>Add up to 50 direct links or magnet URLs. Put one link on each line.</p>
+        <textarea aria-label="Batch download links" className="batch-text" spellCheck={false} placeholder={"https://example.org/file1.zip\\nhttps://example.org/file2.iso"} value={batchText} onChange={e => setBatchText(e.target.value)} rows={9}/>
+        {batchError && <p className="error" role="alert">{batchError}</p>}
+        <div className="modal-actions"><button onClick={() => setBatchOpen(false)}>Cancel</button><button disabled={working || !batchText.trim()} onClick={() => void addBatch()}>Add to queue</button></div>
+      </section>
+    </div>}
     {torrentDialog && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setTorrentDialog(null); }}>
       <section className="modal torrent-modal" role="dialog" aria-modal="true" aria-label="Torrent file selection">
         <div className="modal-title"><div><Magnet size={22}/><h2>Select torrent files</h2></div><button aria-label="Close file selection" onClick={() => setTorrentDialog(null)}><X size={18}/></button></div>
