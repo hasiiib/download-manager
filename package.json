@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "pretauri": "python3 scripts/generate_icon.py"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
