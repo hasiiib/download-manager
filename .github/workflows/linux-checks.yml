@@ -44,3 +44,12 @@ jobs:
       - name: HTTP restart and resume test
         timeout-minutes: 3
         run: python3 -m unittest discover -s tests -p "test_aria2_restart_resume.py" -v
+      - name: Build Ubuntu Debian installer
+        run: npx tauri build --bundles deb
+      - name: Upload Debian installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-manager-ubuntu-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+          retention-days: 14
