@@ -121,7 +121,9 @@ impl Engine {
             .spawn().map_err(|error| std::io::Error::new(error.kind(),
                 format!("Could not start aria2c ({error}). Install it with: sudo apt install aria2")))?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            // This client only speaks to our loopback aria2 RPC endpoint. Ignore
+            // HTTP_PROXY/HTTPS_PROXY environment variables for local control traffic.
+            client: reqwest::Client::builder().no_proxy().build()?,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
             settings: Mutex::new(settings), data_dir,
