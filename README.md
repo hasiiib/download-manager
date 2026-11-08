@@ -198,3 +198,13 @@ Until the workflow reports a successful run and the resulting installer is teste
 - Configuration tests now validate PNG signature, dimensions (64×64 RGBA), chunk order and CRC checksums to catch corrupt generated icons early.
 
 This only verifies the icon-generation logic and configuration in source. A full successful Ubuntu build and installer installation test remain outstanding.
+
+## November 2026 startup and installer checks
+
+- Tauri's RPC HTTP client is now initialized before launching aria2, avoiding an orphaned daemon if client setup fails.
+- `npm run tauri dev` and `npm run tauri build` first generate the icon through npm's `pretauri` hook. Direct `npx tauri build` in CI is preceded by its own explicit icon step.
+- Installer CI verifies that exactly one `.deb` was generated and that the package metadata declares the `aria2` dependency before uploading an artifact.
+- Added a configuration regression test to keep the local icon preflight wired up.
+- The icon-generator algorithm was checked in isolation and its 64×64 RGBA PNG parsed successfully. This does **not** establish that the full app or installer builds.
+
+**Outstanding:** A green Ubuntu GitHub Actions run, installation on Ubuntu 26.04, and a full desktop download/resume smoke test.
