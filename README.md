@@ -118,3 +118,13 @@ These are **pending acceptance tests**, not results already achieved.
 - Added source-validation regression tests for unsupported SFTP, local file metadata, and malformed input.
 - Aligned the frontend, Cargo and Tauri application versions to `0.2.0`.
 - **Status:** changes have been committed; a green Ubuntu build and end-to-end tests are still required. Do not consider this a release-ready build.
+
+## Reliability improvements
+
+- Backend status checks now poll tracked aria2 GIDs concurrently instead of sequentially.
+- The frontend skips overlapping status polls, preventing stale UI responses from piling up.
+- Retry is a separate backend action: it refuses to duplicate an existing active/queued/paused transfer after session restoration, then replaces failed history entries when re-enqueue succeeds.
+- Local aria2 RPC calls bypass proxy environment variables; RPC still requires a private token on loopback.
+- `bash scripts/doctor.sh` reports missing Ubuntu prerequisites without installing or changing anything. The Linux CI workflow runs it before attempting compilation.
+
+**Verification:** These changes are source commits. A passing GitHub Actions run and hands-on Ubuntu tests are still pending; they must not be treated as evidence of a completed release.
