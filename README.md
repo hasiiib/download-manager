@@ -278,3 +278,11 @@ This checksum protects against accidental corruption after build; it is not a di
 The Linux workflow now archives the dependency lockfiles resolved by npm and Cargo (`package-lock.json` and `src-tauri/Cargo.lock`) as a separate `build-dependency-lockfiles` artifact when the build reaches those stages. This allows maintainers to review the exact versions used in CI and commit them for reproducible future builds. The artifact is for review; committing audited lockfiles and switching to `npm ci` / `cargo --locked` remain future release gates.
 
 The Debian payload verifier also fixes regex escaping for expected package versions and `aria2` dependencies. Basic version/dependency regex cases were checked locally, but this does not establish a full `.deb` build or passing GitHub Actions run. This environment could not reach the npm registry to generate a reliable lockfile, so no manually invented or unverified dependency lock was committed.
+
+## CI dependency resolution and package version checks
+
+- The Ubuntu CI job now resolves the npm dependency tree into a lockfile, installs that exact tree using `npm ci`, generates `src-tauri/Cargo.lock`, and runs Rust checks/tests with `--locked`. Both resolved lockfiles are archived as CI artifacts for inspection; they are **not yet committed to the repository**, so different future CI runs may still select different versions until they are reviewed and checked in.
+- `bash scripts/validate-linux.sh` mirrors the same sequence on an Ubuntu development machine. Both operations need package registry access and can fail if it is unavailable.
+- The Debian payload checker reads the expected app name and version from `package.json` rather than hardcoding `0.2.0`, and new unit tests reject wrong package names or release versions.
+
+**Release gate remains open:** A real passing GitHub Actions run, reviewed committed lockfiles, and Ubuntu installer launch/download smoke tests are still outstanding.
