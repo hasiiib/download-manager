@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -68,13 +68,21 @@ export default function App() {
   const [working, setWorking] = useState(false);
   const [refreshError, setRefreshError] = useState("");
   const [settingsError, setSettingsError] = useState("");
+  const refreshing = useRef(false);
 
   const refresh = useCallback(async () => {
+    // Ignore overlapping polls instead of allowing slower responses to overwrite fresh data.
+    if (refreshing.current) return;
+    refreshing.current = true;
     try {
       const list = await invoke<DownloadItem[]>("list_downloads");
       setItems(list);
       setRefreshError("");
-    } catch (err) { setRefreshError(String(err)); }
+    } catch (err) {
+      setRefreshError(String(err));
+    } finally {
+      refreshing.current = false;
+    }
   }, []);
 
   useEffect(() => {
