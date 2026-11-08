@@ -313,14 +313,55 @@ export default function App() {
       </section>
     </div>}
     {settingsOpen && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setSettingsOpen(false); }}>
-      <section className="modal" role="dialog" aria-modal="true" aria-label="Download settings">
-        <div className="modal-title"><div><Settings2 size={22}/><h2>Download settings</h2></div><button aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X size={18}/></button></div>
-        <p>These preferences are saved locally and used for new transfers.</p>
-        <label><span><Zap size={16}/> Connections per server</span><input type="number" min="1" max="16" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
-        <label><span><Download size={16}/> Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
-        <label><span><Activity size={16}/> Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
-        <label><span><Magnet size={16}/> Torrent seeding time (minutes, 0 = off)</span><input type="number" min="0" max="65535" value={draft.seedMinutes} onChange={e => setDraft(s => ({ ...s, seedMinutes: Number(e.target.value) }))}/></label>
-        <label><span><FolderOpen size={16}/> Download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
+      <section className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Download settings">
+        <div className="modal-title"><div><Settings2 size={22}/><h2>Preferences</h2></div><button aria-label="Close settings" onClick={() => setSettingsOpen(false)}><X size={18}/></button></div>
+        <div className="settings-layout">
+          <nav className="settings-tabs" aria-label="Settings categories">
+            {([["general","General"],["connection","Connection"],["save","Save To"],["downloads","Downloads"],["integration","Browser & Files"],["privacy","Proxy & Privacy"]] as const).map(([key,label]) =>
+              <button key={key} type="button" className={settingsTab === key ? "selected" : ""} onClick={() => setSettingsTab(key)}>{label}</button>
+            )}
+          </nav>
+          <div className="settings-content">
+            {settingsTab === "general" && <>
+              <h3>General & performance</h3><p>Control background activity and how frequently progress is updated.</p>
+              <label><span>Refresh interval (seconds)</span><input type="number" min="1" max="30" value={draft.refreshSeconds} onChange={e => setDraft(s => ({ ...s, refreshSeconds: Number(e.target.value) }))}/></label>
+              <label className="settings-toggle"><input type="checkbox" checked={draft.lowMemoryMode} onChange={e => setDraft(s => ({ ...s, lowMemoryMode: e.target.checked }))}/><span><strong>Low Memory Mode</strong><small>Pause status polling while the app is in the background. Recommended.</small></span></label>
+              <p className="settings-note">Uses lightweight aria2 status queries instead of reloading the entire list on every render. Download transfers continue in the background.</p>
+            </>}
+            {settingsTab === "connection" && <>
+              <h3>Connection & speed</h3><p>These settings control the aria2 download engine.</p>
+              <label><span>Connections per server</span><input type="number" min="1" max="16" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
+              <label><span>Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
+              <label><span>Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" max="1048576" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
+              <p className="settings-note">The connection-per-server limit applies to newly queued downloads; the overall rate and concurrent limit update immediately.</p>
+            </>}
+            {settingsTab === "save" && <>
+              <h3>Save To</h3><p>Choose where new downloads are stored.</p>
+              <label><span>Default download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
+              <p className="settings-note">Existing downloads keep their original location. Automatic category folders and temporary-folder selection are planned.</p>
+            </>}
+            {settingsTab === "downloads" && <>
+              <h3>Downloads & torrents</h3><p>Manage transfer behavior.</p>
+              <label><span>Torrent seeding time (minutes, 0 = off)</span><input type="number" min="0" max="65535" value={draft.seedMinutes} onChange={e => setDraft(s => ({ ...s, seedMinutes: Number(e.target.value) }))}/></label>
+              <p className="settings-note">The seeding limit applies to new torrents. Automatic completion actions, download quotas and scheduled queues are planned.</p>
+            </>}
+            {settingsTab === "integration" && <>
+              <h3>Browser integration & file types</h3><p>Planned features, not enabled in this preview.</p>
+              <div className="planned-row">Browser extension integration <span>Planned</span></div>
+              <div className="planned-row">Clipboard URL monitoring <span>Planned</span></div>
+              <div className="planned-row">File extension takeover lists <span>Planned</span></div>
+              <div className="planned-row">Site exclusions & keyboard shortcuts <span>Planned</span></div>
+            </>}
+            {settingsTab === "privacy" && <>
+              <h3>Proxy, accounts & privacy</h3><p>Planned features, not enabled in this preview.</p>
+              <div className="planned-row">HTTP / SOCKS proxy rules <span>Planned</span></div>
+              <div className="planned-row">Site logins & credentials <span>Planned</span></div>
+              <div className="planned-row">Per-site connection exceptions <span>Planned</span></div>
+              <div className="planned-row">Completion sounds & notifications <span>Planned</span></div>
+              <p className="settings-note">The local aria2 RPC remains bound to loopback with a private token.</p>
+            </>}
+          </div>
+        </div>
         {settingsError && <p className="error" role="alert">{settingsError}</p>}
         <div className="modal-actions"><button onClick={() => setSettingsOpen(false)}>Cancel</button><button disabled={working} onClick={() => void save()}>Save settings</button></div>
       </section>
