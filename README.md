@@ -258,3 +258,17 @@ Settings can be syntactically valid JSON yet unusable, such as a saved concurren
 When saving repaired settings, the previous file is eligible to replace `settings.bak` only if it passes both JSON schema decoding and settings value validation. A Rust regression test checks recovery and verifies an invalid primary cannot overwrite the last good backup.
 
 These changes are committed, but the Ubuntu build and aria2 integration suite still lack a confirmed passing run.
+
+## Ubuntu package verification (experimental)
+
+The Linux CI job now inspects any generated `.deb` file before publishing it as an artifact. The offline `scripts/check_deb.py` verifier checks the Debian package name, version, declared `aria2` dependency, executable at `/usr/bin/download-manager`, desktop launcher, and application icon. A separate set of unit tests checks that the verifier rejects missing files or dependencies.
+
+If the build and verification **both pass**, CI uploads the installer plus a `SHA256SUMS` file. After obtaining the artifact, verify integrity from the directory containing both files:
+
+```bash
+sha256sum -c SHA256SUMS
+```
+
+This checksum protects against accidental corruption after build; it is not a digital signature and does not independently establish publisher authenticity. The package is still experimental, and no green end-to-end Ubuntu build or installation has been confirmed.
+
+**Build reproducibility gap:** the repository currently does not track `package-lock.json` or `src-tauri/Cargo.lock`. Those files should be generated and committed with the exact resolved dependencies before a release, allowing `npm ci` and locked Cargo builds.
