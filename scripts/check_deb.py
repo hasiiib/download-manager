@@ -32,9 +32,9 @@ def validate(package: pathlib.Path) -> None:
     print(f"Package: {name}\nVersion: {version}\nDepends: {dependencies}")
     if name != "download-manager":
         raise ValueError(f"Unexpected package name: {name}")
-    if not re.fullmatch(r"0\\.2\\.0(?:[-+].+)?", version):
+    if not re.fullmatch(r"0\.2\.0(?:[-+].+)?", version):
         raise ValueError(f"Unexpected package version: {version}")
-    if not re.search(r"(?:^|,)\\s*aria2(?:\\s*\\([^)]*\\))?(?:\\s*,|$)", dependencies):
+    if not re.search(r"(?:^|,)\s*aria2(?:\s*\([^)]*\))?(?:\s*,|$)", dependencies):
         raise ValueError("Installer does not declare aria2 dependency")
 
     paths = package_paths(package)
