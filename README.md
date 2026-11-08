@@ -242,3 +242,11 @@ Each successful overwrite of `downloads.json` and `settings.json` now retains th
 If both copies are invalid, startup still fails with an explicit error instead of erasing the user's download history. Backup files contain potentially private download URLs and are protected by the same restricted Unix file permissions as the main JSON files. The Rust tests cover valid backup creation, recovery, preservation of a good backup after corruption, and the failure case where both copies are bad.
 
 **Limits:** the backup is a previous snapshot and can be a few seconds behind the newest state. This mechanism does not repair aria2 session files, nor does it replace an off-device backup. The Ubuntu Rust build and tests still require a verified successful run.
+
+## Additional backup recovery safeguards
+
+- If the main settings or download-history JSON file has disappeared but a `.bak` snapshot exists, startup now restores from the backup instead of treating it as a fresh installation. A missing primary plus an invalid backup produces an explicit error.
+- A syntactically valid JSON file of the wrong document type (for example, an array where a download-history map is required) is no longer considered eligible to replace the last valid backup. The backup must deserialize as the same document type being saved.
+- Rust regression coverage now includes missing-primary recovery, invalid backup contents, and incompatible JSON document structures.
+
+**Verification:** These safeguards are committed but the repository's Rust compilation and Ubuntu installer workflow have not yet returned a confirmed passing status. Do not regard them as proven until CI and real-machine restart tests pass.
