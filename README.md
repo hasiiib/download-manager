@@ -146,3 +146,15 @@ The automated Ubuntu integration suite now includes `tests/test_aria2_session.py
 The desktop engine now explicitly requests `aria2.saveSession` after accepting downloads, pausing/resuming/cancelling and reordering queued jobs, in addition to periodic automatic saves. Save failures are treated as warnings *after* a download has started, rather than reported as a failed enqueue that users might duplicate.
 
 **Still unverified:** resume of an interrupted partially-downloaded HTTP file and real BitTorrent payload recovery; those need additional tests and a successful Ubuntu CI run. The repository connector has not reported a passing CI check yet.
+
+## HTTP pause/resume verification
+
+The test suite now includes `tests/test_aria2_resume.py`, which runs a deliberately slow **localhost-only** HTTP server that supports byte ranges. The test starts aria2, waits for measurable partial progress, pauses the transfer, resumes the same GID, then verifies all 4 MiB using SHA-256. The server implements both HTTP `HEAD` and `GET` probes.
+
+Run all integration tests on an Ubuntu machine with aria2 installed:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+The Linux CI workflow also offers a manual `workflow_dispatch` trigger and executes the same suite after TypeScript and Rust checks. **These are committed tests, not proof they have passed.** A confirmed passing GitHub Actions run and actual desktop testing remain necessary. The current test verifies in-process pause/resume, while partial-file recovery across a full process restart still needs a dedicated test.
