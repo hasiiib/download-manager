@@ -322,11 +322,17 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     // Bounded, ordered concurrency keeps hundreds of downloads from flooding the
     // local RPC server while preserving a stable row order.
     let statuses: Vec<_> = stream::iter(snapshot.into_iter().map(|item| async {
-        let status = engine.rpc("tellStatus", vec![json!(item.gid)]).await;
+        // Completed/removed/error entries are historical records, not live jobs.
+        // Avoid querying aria2 for every such record every 1.5 seconds.
+        let status = if matches!(item.status.as_str(), "complete" | "removed" | "error") {
+            None
+        } else {
+            Some(engine.rpc("tellStatus", vec![json!(item.gid)]).await)
+        };
         (item, status)
     })).buffered(8).collect().await;
     for (mut item, result) in statuses {
-        if let Ok(status) = result.as_ref() {
+        if let Some(Ok(status)) = result.as_ref() {
             // aria2 creates a follow-up GID after retrieving magnet/torrent metadata.
             // Track it separately so the actual payload remains visible and controllable.
             if let Some(children) = status.get("followedBy").and_then(Value::as_array) {
@@ -365,7 +371,8 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             if item.status == "error" {
                 item.error = status.get("errorMessage").and_then(Value::as_str).map(str::to_string);
             }
-        } else if result.as_ref().err().is_some_and(|error| is_missing_gid_error(error)) {
+        } else if result.as_ref().and_then(|result| result.as_ref().err())
+            .is_some_and(|error| is_missing_gid_error(error)) {
             if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
                 item.status = "interrupted".into();
             }
