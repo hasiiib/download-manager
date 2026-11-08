@@ -15,6 +15,7 @@ A Linux-first desktop download manager built with **Tauri 2**, **React**, **Type
 - Download history stored locally as JSON, plus aria2's session persistence.
 - Settings: connections per server (1–16), concurrent downloads (1–10), overall speed limit, target directory and optional torrent seeding time.
 - Transfer status filters and filename/source search.
+- Batch link input for 1–50 downloads, with individual error reporting.
 - aria2 RPC bound to localhost with a random per-launch authentication token.
 
 ## Ubuntu requirements
@@ -102,3 +103,10 @@ These are **pending acceptance tests**, not results already achieved.
 - Short-lived RPC transport failures no longer automatically mark a job interrupted. This status is reserved for known missing GIDs.
 - Added `tests/test_aria2_rpc.py`, which serves a local file, downloads it through aria2's authenticated RPC and verifies SHA-256; CI runs it on Linux.
 - Successful local/CI execution is still required before declaring these changes stable.
+
+## Recent batch download improvements
+
+- Added `add_batch` for up to 50 sources with per-line errors; valid links continue even if others fail.
+- Desktop UI has a multiline input for batch queue entry.
+- Added source input tests and a safer early-exit check for the aria2 child process.
+- These changes are committed but still require a passing Linux build and real-world testing.
