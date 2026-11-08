@@ -74,7 +74,10 @@ class TestHttpRestartResume(unittest.TestCase):
                     state = second.rpc("tellStatus", [gid])
                     self.assertEqual(state["gid"], gid)
                     self.assertIn(state["status"], ("paused", "waiting"))
-                    second.rpc("unpause", [gid])
+                    # A restored queued transfer may not be paused, so only
+                    # unpause when aria2 explicitly reports the paused state.
+                    if state["status"] == "paused":
+                        second.rpc("unpause", [gid])
                     state = wait_for_status(second, gid, {"complete"}, timeout=40)
                     self.assertEqual(int(state["completedLength"]), len(PAYLOAD))
                     target = folder / "range.bin"
