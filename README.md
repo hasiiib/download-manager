@@ -128,3 +128,13 @@ These are **pending acceptance tests**, not results already achieved.
 - `bash scripts/doctor.sh` reports missing Ubuntu prerequisites without installing or changing anything. The Linux CI workflow runs it before attempting compilation.
 
 **Verification:** These changes are source commits. A passing GitHub Actions run and hands-on Ubuntu tests are still pending; they must not be treated as evidence of a completed release.
+
+## November 2026 recovery and performance update
+
+- RPC status polling now has a concurrency limit of eight jobs, so very large queues do not overwhelm the aria2 control server.
+- Retrying a failed or interrupted transfer is blocked when the engine status check fails unexpectedly. This avoids duplicate file transfers when RPC is temporarily unavailable.
+- Added a Rust regression test to distinguish confirmed missing GIDs from connection errors.
+- Active transfers now display a simple estimated time remaining, based on current download speed and reported total size. It is an estimate, not a guarantee.
+- Interrupted transfers are visible in the Failed filter.
+
+The changes require real Ubuntu compilation and restart/transfer tests before they are considered release ready.
