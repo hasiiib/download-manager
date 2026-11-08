@@ -218,6 +218,10 @@ fn validate_source(input: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn is_historical_status(status: &str) -> bool {
+    matches!(status, "complete" | "removed" | "error")
+}
+
 fn is_missing_gid_error(error: &str) -> bool {
     let normalized = error.to_ascii_lowercase();
     normalized.contains("gid") && normalized.contains("not found")
@@ -324,7 +328,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     let statuses: Vec<_> = stream::iter(snapshot.into_iter().map(|item| async {
         // Completed/removed/error entries are historical records, not live jobs.
         // Avoid querying aria2 for every such record every 1.5 seconds.
-        let status = if matches!(item.status.as_str(), "complete" | "removed" | "error") {
+        let status = if is_historical_status(&item.status) {
             None
         } else {
             Some(engine.rpc("tellStatus", vec![json!(item.gid)]).await)
@@ -635,6 +639,16 @@ mod tests {
         settings.concurrent = 3;
         settings.speed_limit_kib = 1_048_577;
         assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn does_not_poll_historical_downloads() {
+        assert!(is_historical_status("complete"));
+        assert!(is_historical_status("removed"));
+        assert!(is_historical_status("error"));
+        assert!(!is_historical_status("active"));
+        assert!(!is_historical_status("waiting"));
+        assert!(!is_historical_status("paused"));
+        assert!(!is_historical_status("interrupted"));
     }
     #[test]
     fn missing_gid_detection_only_accepts_confirmed_not_found() {
