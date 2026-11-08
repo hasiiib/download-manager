@@ -6,6 +6,9 @@ cd "$(dirname "$0")/.."
 echo '== Ubuntu prerequisite checks =='
 bash scripts/doctor.sh
 
+echo '== Generate Tauri icon =='
+python3 scripts/generate_icon.py
+
 echo '== TypeScript and Vite build =='
 npm run build
 
@@ -14,6 +17,9 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 echo '== Rust unit tests =='
 cargo test --manifest-path src-tauri/Cargo.toml
+
+echo '== Project configuration tests =='
+python3 -m unittest discover -s tests -p 'test_project_config.py' -v
 
 echo '== Python test file syntax =='
 python3 -m compileall -q tests
