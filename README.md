@@ -298,3 +298,17 @@ Reproducibility remains incomplete until actual npm/Cargo lockfiles are committe
 `scripts/check_deb.py` now streams the Debian package's uncompressed tar entries directly from `dpkg-deb --fsys-tarfile` rather than loading the complete package payload into memory. The error handling reports an invalid archive instead of presenting an unhandled traceback. Regression coverage includes a deliberately corrupted archive and an actual locally assembled Debian fixture.
 
 The streaming inspection and corrupt-archive rejection were exercised locally with `dpkg-deb`. This is **not** a passing Rust compile, Tauri installer build, or successful Ubuntu desktop launch. Real npm and Cargo lockfiles are still missing from the repository, and a green GitHub Actions run is still needed before release.
+
+## Help test the Ubuntu app locally
+
+On an Ubuntu machine with this repository cloned, run:
+
+```bash
+cd download-manager
+git pull origin main
+bash scripts/ubuntu-qa.sh
+```
+
+The script requires no `sudo`, installs no operating-system packages, and stops at the first failure. It checks prerequisites, generates the icon, installs frontend npm dependencies, runs the TypeScript/Vite build, checks/tests the Rust backend, and runs the Python configuration and Debian-checker suites. Separate logs are saved under `/tmp/download-manager-qa.*`; the last 25 lines of a failed step appear in the terminal.
+
+Send the failed step's output to the developer, but review it first for passwords, private URLs or tokens. If the script completes, try `npm run tauri -- build --bundles deb`, then share the result and any build error. Running the script alone does not establish that the packaged desktop app launches successfully.
