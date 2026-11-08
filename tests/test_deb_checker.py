@@ -63,6 +63,14 @@ class TestDebChecker(unittest.TestCase):
             )
             checker.validate(archive)
 
+    @unittest.skipUnless(shutil.which("dpkg-deb"), "dpkg-deb is required")
+    def test_rejects_corrupt_debian_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "corrupted.deb"
+            path.write_bytes(b"not a Debian archive")
+            with self.assertRaisesRegex((ValueError, subprocess.CalledProcessError), "archive|Debian"):
+                checker.package_paths(path)
+
     def test_valid_package(self):
         self.check()
 
