@@ -35,3 +35,5 @@
 
 .torrent-metadata{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border:1px solid #313a58;border-radius:10px;background:#121b32;font-size:11px;color:#98a6c3}
 .torrent-metadata strong{color:#d8ccff}.torrent-metadata details{width:100%;overflow-wrap:anywhere}.torrent-metadata summary{cursor:pointer;color:#c5b3fc}.torrent-metadata ul{padding-left:19px;line-height:1.8;max-height:110px;overflow-y:auto}
+
+.picker-row{gap:10px;flex-wrap:wrap}.batch-modal{width:min(640px,100%)}.batch-text{width:100%;display:block;border:1px solid #384160;background:#0b1122;color:#e9edff;border-radius:12px;padding:14px 16px;resize:vertical;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;outline:none;min-height:180px}.batch-text:focus{border-color:#9a82ff}.batch-modal .error{overflow-wrap:anywhere;max-height:110px;overflow:auto}
