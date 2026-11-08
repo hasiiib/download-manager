@@ -1,6 +1,6 @@
 [package]
 name = "download-manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Ubuntu-first cross-platform download manager"
 authors = ["hasiiib"]
 edition = "2021"
