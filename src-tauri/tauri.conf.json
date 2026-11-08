@@ -29,6 +29,13 @@
     "targets": "all",
     "icons": [
       "icons/icon.png"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "aria2"
+        ]
+      }
+    }
   }
 }
