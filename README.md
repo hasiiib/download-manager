@@ -234,3 +234,11 @@ A Rust unit test checks that speed/byte changes are throttled while status and f
 - A Rust regression test checks replacement saves, missing-vs-corrupt reads, and Unix file permissions.
 
 These changes are committed, but runtime validation on Ubuntu and a passing Linux build are still required. Atomic filesystem replacement reduces damage from interrupted writes; it does not guarantee safety against failing storage hardware.
+
+## Recovery from corrupted local JSON state
+
+Each successful overwrite of `downloads.json` and `settings.json` now retains the previously committed, syntactically valid JSON document as a private `.bak` file (for example, `downloads.bak`). Both the backup and the primary file use atomic temporary-file replacement. On startup, if the primary document is malformed or cannot deserialize, the application attempts to load the last valid backup and logs the recovery. The corrupt primary is left untouched until the next successful save, so it can be inspected if necessary.
+
+If both copies are invalid, startup still fails with an explicit error instead of erasing the user's download history. Backup files contain potentially private download URLs and are protected by the same restricted Unix file permissions as the main JSON files. The Rust tests cover valid backup creation, recovery, preservation of a good backup after corruption, and the failure case where both copies are bad.
+
+**Limits:** the backup is a previous snapshot and can be a few seconds behind the newest state. This mechanism does not repair aria2 session files, nor does it replace an off-device backup. The Ubuntu Rust build and tests still require a verified successful run.
