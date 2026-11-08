@@ -76,8 +76,16 @@ fn home() -> PathBuf {
         .map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T> {
-    fs::read(path).ok().and_then(|raw| serde_json::from_slice(&raw).ok())
+fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<Option<T>, String> {
+    // Only a genuinely absent file means "first launch". An unreadable or
+    // malformed history must not silently become an empty list and be overwritten.
+    let raw = match fs::read(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
+    };
+    serde_json::from_slice(&raw).map(Some)
+        .map_err(|error| format!("Invalid JSON in {}: {error}", path.display()))
 }
 
 fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
@@ -111,10 +119,10 @@ impl Engine {
         // app-managed state inaccessible to other local Unix users.
         #[cfg(unix)]
         fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))?;
-        let settings: Settings = load_json(&data_dir.join("settings.json")).unwrap_or_else(Settings::defaults);
+        let settings: Settings = load_json(&data_dir.join("settings.json"))?.unwrap_or_else(Settings::defaults);
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
-        let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json")).unwrap_or_default();
+        let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json"))?.unwrap_or_default();
         // A process restart may invalidate an old aria2 GID. Avoid showing stale speed.
         for download in history.values_mut() {
             download.download_speed = 0;
@@ -697,8 +705,13 @@ mod tests {
         let mut second = BTreeMap::new();
         second.insert("new", 2_u32);
         save_json(&path, &second).unwrap();
-        assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap(), second);
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap().unwrap(), second);
         assert!(!path.with_extension("tmp").exists());
+        // Missing data is expected on first launch, corrupt data is not.
+        assert!(load_json::<BTreeMap<String, u32>>(&folder.join("missing.json")).unwrap().is_none());
+        fs::write(&path, b"{not-json").unwrap();
+        assert!(load_json::<BTreeMap<String, u32>>(&path).is_err());
+        save_json(&path, &second).unwrap();
         #[cfg(unix)]
         assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         fs::remove_dir_all(&folder).unwrap();
