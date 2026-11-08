@@ -116,6 +116,30 @@ fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<O
     }
 }
 
+fn load_validated_settings(path: &std::path::Path) -> Result<Settings, String> {
+    let primary = load_json::<Settings>(path)?;
+    if let Some(settings) = primary {
+        match settings.validate() {
+            Ok(()) => return Ok(settings),
+            Err(primary_error) => {
+                // A syntactically valid settings document may still contain
+                // unusable values. Attempt the last known-good backup.
+                let backup = path.with_extension("bak");
+                let restored = load_json::<Settings>(&backup)?
+                    .ok_or_else(|| format!("Invalid settings in {}: {primary_error}; backup is missing",
+                        path.display()))?;
+                restored.validate().map_err(|backup_error| format!(
+                    "Invalid settings in {}: {primary_error}; backup {} is invalid: {backup_error}",
+                    path.display(), backup.display()
+                ))?;
+                eprintln!("Recovered invalid settings from {}; primary is preserved", backup.display());
+                return Ok(restored);
+            }
+        }
+    }
+    Ok(Settings::defaults())
+}
+
 fn save_json<T: Serialize + serde::de::DeserializeOwned>(path: &std::path::Path, value: &T) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
@@ -171,7 +195,7 @@ impl Engine {
         // app-managed state inaccessible to other local Unix users.
         #[cfg(unix)]
         fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))?;
-        let settings: Settings = load_json(&data_dir.join("settings.json"))?.unwrap_or_else(Settings::defaults);
+        let settings = load_validated_settings(&data_dir.join("settings.json"))?;
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
         let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json"))?.unwrap_or_default();
@@ -793,6 +817,22 @@ mod tests {
         fs::remove_dir_all(&folder).unwrap();
     }
 
+    #[test]
+    fn restores_semantically_invalid_settings_from_valid_backup() {
+        let folder = std::env::temp_dir().join(format!("dm-settings-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("settings.json");
+        let settings = Settings::defaults();
+        save_json(&path, &settings).unwrap();
+        save_json(&path, &settings).unwrap();
+        let mut invalid = settings.clone();
+        invalid.concurrent = 0;
+        fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert_eq!(load_validated_settings(&path).unwrap().concurrent, settings.concurrent);
+        fs::write(&path.with_extension("bak"), serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(load_validated_settings(&path).is_err());
+        fs::remove_dir_all(&folder).unwrap();
+    }
     #[test]
     fn validates_connection_limits() {
         let mut settings = Settings::defaults();
