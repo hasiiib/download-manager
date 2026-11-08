@@ -77,15 +77,31 @@ fn home() -> PathBuf {
 }
 
 fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<Option<T>, String> {
-    // Only a genuinely absent file means "first launch". An unreadable or
-    // malformed history must not silently become an empty list and be overwritten.
+    // Missing data means first launch; corrupted/unreadable data is never
+    // silently replaced with an empty history. Recover from the last good
+    // backup when possible, preserving the damaged primary for diagnosis.
     let raw = match fs::read(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
     };
-    serde_json::from_slice(&raw).map(Some)
-        .map_err(|error| format!("Invalid JSON in {}: {error}", path.display()))
+    match serde_json::from_slice(&raw) {
+        Ok(data) => Ok(Some(data)),
+        Err(primary_error) => {
+            let backup = path.with_extension("bak");
+            let bytes = fs::read(&backup).map_err(|backup_error| format!(
+                "Invalid JSON in {}: {primary_error}; backup {} unavailable: {backup_error}",
+                path.display(), backup.display()
+            ))?;
+            let restored = serde_json::from_slice(&bytes).map_err(|backup_error| format!(
+                "Invalid JSON in {}: {primary_error}; backup {} is also invalid: {backup_error}",
+                path.display(), backup.display()
+            ))?;
+            eprintln!("Recovered {} using backup {}; original is preserved",
+                path.display(), backup.display());
+            Ok(Some(restored))
+        }
+    }
 }
 
 fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
@@ -101,6 +117,23 @@ fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), Stri
     file.write_all(&bytes).map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
     drop(file);
+    // Retain the previous valid snapshot before committing a replacement.
+    // Never overwrite a known-good backup with a corrupt primary.
+    if let Ok(current) = fs::read(path) {
+        if serde_json::from_slice::<Value>(&current).is_ok() {
+            let backup = path.with_extension("bak");
+            let backup_tmp = path.with_extension("bak.tmp");
+            let mut backup_file = fs::OpenOptions::new().create(true).write(true)
+                .truncate(true).open(&backup_tmp).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            fs::set_permissions(&backup_tmp, fs::Permissions::from_mode(0o600))
+                .map_err(|e| e.to_string())?;
+            backup_file.write_all(&current).map_err(|e| e.to_string())?;
+            backup_file.sync_all().map_err(|e| e.to_string())?;
+            drop(backup_file);
+            fs::rename(&backup_tmp, &backup).map_err(|e| e.to_string())?;
+        }
+    }
     fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
@@ -706,10 +739,19 @@ mod tests {
         second.insert("new", 2_u32);
         save_json(&path, &second).unwrap();
         assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap().unwrap(), second);
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path.with_extension("bak"))
+            .unwrap().unwrap(), first);
         assert!(!path.with_extension("tmp").exists());
         // Missing data is expected on first launch, corrupt data is not.
         assert!(load_json::<BTreeMap<String, u32>>(&folder.join("missing.json")).unwrap().is_none());
         fs::write(&path, b"{not-json").unwrap();
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap().unwrap(), first);
+        // Saving the recovered snapshot must not destroy the good backup.
+        save_json(&path, &second).unwrap();
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path.with_extension("bak"))
+            .unwrap().unwrap(), first);
+        fs::write(&path, b"{still-broken").unwrap();
+        fs::write(path.with_extension("bak"), b"{also-broken").unwrap();
         assert!(load_json::<BTreeMap<String, u32>>(&path).is_err());
         save_json(&path, &second).unwrap();
         #[cfg(unix)]
