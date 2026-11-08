@@ -44,12 +44,12 @@ const activeState = (s: string) => ["active", "waiting", "paused"].includes(s);
 const filtered = (d: DownloadItem, filter: Filter) => filter === "all" ||
   (filter === "active" && activeState(d.status)) ||
   (filter === "complete" && d.status === "complete") ||
-  (filter === "error" && ["error", "removed"].includes(d.status)) ||
+  (filter === "error" && ["error", "removed", "interrupted"].includes(d.status)) ||
   (filter === "torrent" && isTorrent(d));
 
 function StatusIcon({ status }: { status: string }) {
   if (status === "complete") return <CheckCircle2 size={13} />;
-  if (status === "error" || status === "removed") return <XCircle size={13} />;
+  if (status === "error" || status === "removed" || status === "interrupted") return <XCircle size={13} />;
   if (status === "active") return <Activity size={13} />;
   return <Clock3 size={13} />;
 }
