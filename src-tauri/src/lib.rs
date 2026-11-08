@@ -179,11 +179,14 @@ impl Drop for Engine {
     }
 }
 
-#[tauri::command]
-async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Download, String> {
+async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
     let input = source.trim();
     if input.len() > 8192 { return Err("Download source is too long".into()); }
     if input.is_empty() { return Err("Paste a download URL, magnet link or a .torrent/.meta4 path".into()); }
+    if input.contains(['\n', '\r', '\0']) { return Err("Download source contains invalid characters".into()); }
+    if input.starts_with("magnet:?") && !input.contains("xt=urn:btih:") && !input.contains("xt=urn:btmh:") {
+        return Err("Magnet link has no recognized BitTorrent info hash".into());
+    }
     let settings = engine.settings.lock().map_err(|e| e.to_string())?.clone();
     let mut opts = json!({
         "dir": settings.download_dir,
@@ -229,6 +232,33 @@ async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Downl
         total_length: 0, download_speed: 0, upload_speed: 0, path: String::new(), error: None };
     engine.remember(item.clone())?;
     Ok(item)
+}
+
+#[tauri::command]
+async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Download, String> {
+    enqueue(&engine, source).await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchResult {
+    added: usize,
+    errors: Vec<String>,
+}
+
+#[tauri::command]
+async fn add_batch(engine: State<'_, Engine>, sources: Vec<String>) -> Result<BatchResult, String> {
+    if sources.is_empty() || sources.len() > 50 {
+        return Err("A batch must contain between 1 and 50 links".into());
+    }
+    let mut result = BatchResult { added: 0, errors: Vec::new() };
+    for (index, source) in sources.into_iter().enumerate() {
+        match enqueue(&engine, source).await {
+            Ok(_) => result.added += 1,
+            Err(error) => result.errors.push(format!("Line {}: {}", index + 1, error)),
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -524,7 +554,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings
+            add_download, add_batch, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Download Manager");
