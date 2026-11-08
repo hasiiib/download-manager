@@ -82,7 +82,19 @@ fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<O
     // backup when possible, preserving the damaged primary for diagnosis.
     let raw = match fs::read(path) {
         Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let backup = path.with_extension("bak");
+            let bytes = match fs::read(&backup) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                Err(error) => return Err(format!("Cannot read backup {}: {error}", backup.display())),
+            };
+            let recovered = serde_json::from_slice(&bytes)
+                .map_err(|error| format!("Primary {} is missing and backup {} is invalid: {error}",
+                    path.display(), backup.display()))?;
+            eprintln!("Recovered missing {} from {}", path.display(), backup.display());
+            return Ok(Some(recovered));
+        },
         Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
     };
     match serde_json::from_slice(&raw) {
@@ -104,7 +116,7 @@ fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Result<O
     }
 }
 
-fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
+fn save_json<T: Serialize + serde::de::DeserializeOwned>(path: &std::path::Path, value: &T) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
     // Write a complete temporary document first. Never truncate the last
@@ -125,7 +137,9 @@ fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), Stri
         Err(error) => return Err(format!("Cannot back up {}: {error}", path.display())),
     };
     if let Some(current) = previous {
-        if serde_json::from_slice::<Value>(&current).is_ok() {
+        // A syntactically valid JSON object might still have the wrong schema.
+        // Only preserve backups that deserialize to this exact document type.
+        if serde_json::from_slice::<T>(&current).is_ok() {
             let backup = path.with_extension("bak");
             let backup_tmp = path.with_extension("bak.tmp");
             let mut backup_file = fs::OpenOptions::new().create(true).write(true)
@@ -747,6 +761,14 @@ mod tests {
         assert_eq!(load_json::<BTreeMap<String, u32>>(&path.with_extension("bak"))
             .unwrap().unwrap(), first);
         assert!(!path.with_extension("tmp").exists());
+        fs::remove_file(&path).unwrap();
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap().unwrap(), first);
+        save_json(&path, &second).unwrap();
+        // Valid JSON with an incompatible document schema must not replace backup.
+        fs::write(&path, b"[]").unwrap();
+        save_json(&path, &second).unwrap();
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path.with_extension("bak"))
+            .unwrap().unwrap(), first);
         // Missing data is expected on first launch, corrupt data is not.
         assert!(load_json::<BTreeMap<String, u32>>(&folder.join("missing.json")).unwrap().is_none());
         fs::write(&path, b"{not-json").unwrap();
