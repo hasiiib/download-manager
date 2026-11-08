@@ -344,3 +344,16 @@ Settings are now organized into six sections modeled on IDM's settings taxonomy:
 Low Memory Mode defaults on. It pauses UI status polling when the window/document is hidden, while aria2 continues transfers, and the visible progress refresh defaults to three seconds instead of the old 1.5-second interval. These preferences persist in settings.json and the new fields have backward-compatible defaults. This reduces idle polling overhead but does **not** guarantee a particular RAM usage; that still needs to be measured on Ubuntu.
 
 After pulling the change, rerun `bash scripts/ubuntu-qa.sh`, rebuild the .deb, reinstall, and test **Add download** with the **Completed** filter selected. The next step is to verify actual download progress, history persistence, and basic settings on the Ubuntu machine.
+
+## Real Ubuntu process/RAM findings (November 2026)
+
+An Ubuntu 26.04.1 desktop run passed all eight QA stages, compiled and installed the .deb, and reported approximately **193,636 KiB RSS** for the Tauri/WebKit application and **four aria2c processes**, each at about 15–17 MiB RSS. This is one observed machine, not a controlled memory benchmark, and the processes may include earlier leaked sessions. The app previously relied on Rust managed-state `Drop` to terminate aria2; the desktop now also explicitly calls shutdown on Tauri `RunEvent::Exit`, flushing history and terminating only the child it spawned. Forced termination, crashes, and previously orphaned children are still outside this normal-exit cleanup.
+
+To investigate without exposing aria2 RPC secrets, inspect process names, memory and parent PIDs **without printing full command lines**:
+
+```bash
+ps -C download-manager -o pid,ppid,rss,etime,comm
+ps -C aria2c -o pid,ppid,rss,etime,comm
+```
+
+Close all Download Manager windows normally and rerun both commands. If aria2c processes remain, report their PID/PPID and elapsed times before terminating anything. Do **not** run `pkill aria2c` indiscriminately, since other apps may own some aria2 processes. The app process RSS includes WebKit overhead, which UI polling changes cannot eliminate; meaningful memory optimization requires measuring idle and active cases separately.
