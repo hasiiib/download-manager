@@ -183,7 +183,7 @@ impl Drop for Engine {
 fn validate_source(input: &str) -> Result<(), String> {
     if input.len() > 8192 { return Err("Download source is too long".into()); }
     if input.is_empty() { return Err("Paste a download URL, magnet link or a .torrent/.meta4 path".into()); }
-    if input.chars().any(|ch| ch == '\\n' || ch == '\\r' || ch == '\\0') {
+    if input.chars().any(|ch| ch == '\n' || ch == '\r' || ch == '\0') {
         return Err("Download source contains invalid characters".into());
     }
     if input.starts_with("magnet:?") && !input.contains("xt=urn:btih:") && !input.contains("xt=urn:btmh:") {
