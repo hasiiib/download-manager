@@ -44,12 +44,12 @@ class TestDebChecker(unittest.TestCase):
             control = package_root / "DEBIAN" / "control"
             control.parent.mkdir(parents=True)
             control.write_text(
-                "Package: download-manager\\n"
-                "Version: 0.2.0-1\\n"
-                "Architecture: all\\n"
-                "Maintainer: QA <qa@example.invalid>\\n"
-                "Depends: aria2\\n"
-                "Description: Offline Debian archive smoke test\\n",
+                "Package: download-manager\n"
+                "Version: 0.2.0-1\n"
+                "Architecture: all\n"
+                "Maintainer: QA <qa@example.invalid>\n"
+                "Depends: aria2\n"
+                "Description: Offline Debian archive smoke test\n",
                 encoding="utf-8",
             )
             for name in EXPECTED:
