@@ -334,3 +334,13 @@ download-manager
 ```
 
 If the app still fails, report what happens when pressing **Settings** and **Add download**, the visible error/status indicator, and the output from `tail -n 30 ~/.local/share/download-manager/aria2.stderr.log` after reviewing it for sensitive information. A successful installer build or install does not itself verify downloads or GUI interactions.
+
+## Filter visibility and low-memory preferences
+
+On the first Ubuntu desktop field test, **Completed** was selected with zero completed items. A newly added transfer would therefore stay hidden in this filtered view, even if it had been accepted by aria2. Adding a single or batch download now switches to **All downloads**, clears search, and exposes the new transfer. Empty filtered views explain this and offer **Show all downloads**.
+
+Settings are now organized into six sections modeled on IDM's settings taxonomy: **General**, **Connection**, **Save To**, **Downloads**, **Browser & Files**, and **Proxy & Privacy**. The functional controls are download folder, concurrent jobs, connections per server, speed limit, torrent seed duration, progress refresh interval (1–30 seconds), and Low Memory Mode. Other IDM-inspired categories show clearly marked **Planned** entries rather than misleading non-functional controls. This is not full IDM settings parity.
+
+Low Memory Mode defaults on. It pauses UI status polling when the window/document is hidden, while aria2 continues transfers, and the visible progress refresh defaults to three seconds instead of the old 1.5-second interval. These preferences persist in settings.json and the new fields have backward-compatible defaults. This reduces idle polling overhead but does **not** guarantee a particular RAM usage; that still needs to be measured on Ubuntu.
+
+After pulling the change, rerun `bash scripts/ubuntu-qa.sh`, rebuild the .deb, reinstall, and test **Add download** with the **Completed** filter selected. The next step is to verify actual download progress, history persistence, and basic settings on the Ubuntu machine.
