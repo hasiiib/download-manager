@@ -273,7 +273,11 @@ async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
     let name = input.rsplit('/').next().unwrap_or(input).chars().take(120).collect::<String>();
     let item = Download { gid, source: input.to_string(), is_torrent: input.starts_with("magnet:") || input.to_ascii_lowercase().contains(".torrent"), name, status: "waiting".into(), completed_length: 0,
         total_length: 0, download_speed: 0, upload_speed: 0, path: String::new(), error: None };
-    engine.remember(item.clone())?;
+    if let Err(error) = engine.remember(item.clone()) {
+        // The RPC transfer is already running. Returning an error here could
+        // tempt users to retry and accidentally enqueue a duplicate download.
+        eprintln!("Download started, but its local history could not be saved: {error}");
+    }
     // Persist queue state immediately. If disk saving fails, do not report an
     // enqueue failure: aria2 has already accepted the transfer.
     let _ = engine.rpc("saveSession", vec![]).await;
@@ -412,7 +416,9 @@ async fn retry_download(engine: State<'_, Engine>, gid: String) -> Result<Downlo
     let replacement = enqueue(&engine, original.source.clone()).await?;
     let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
     entries.remove(&gid);
-    save_json(&engine.data_dir.join("downloads.json"), &*entries)?;
+    if let Err(error) = save_json(&engine.data_dir.join("downloads.json"), &*entries) {
+        eprintln!("Retry succeeded but history cleanup could not be saved: {error}");
+    }
     Ok(replacement)
 }
 
