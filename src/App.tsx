@@ -176,7 +176,7 @@ export default function App() {
 
   const retry = async (item: DownloadItem) => {
     setMessage("");
-    try { await invoke("add_download", { source: item.source }); await refresh(); }
+    try { await invoke("retry_download", { gid: item.gid }); await refresh(); }
     catch (err) { setMessage(String(err)); }
   };
 
