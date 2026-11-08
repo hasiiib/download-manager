@@ -37,6 +37,7 @@ class Aria2Session:
                 f"--save-session={session_file}",
                 "--save-session-interval=1",
                 "--max-concurrent-downloads=1",
+                "--pause=true",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
