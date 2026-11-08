@@ -30,5 +30,17 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
-      - name: Local aria2 RPC and pause/resume integration tests
-        run: python3 -m unittest discover -s tests -p "test_*.py" -v
+      - name: Python syntax checks
+        run: python3 -m compileall -q tests
+      - name: Local HTTP checksum smoke test
+        timeout-minutes: 2
+        run: python3 -m unittest discover -s tests -p "test_aria2_rpc.py" -v
+      - name: Session restore test
+        timeout-minutes: 2
+        run: python3 -m unittest discover -s tests -p "test_aria2_session.py" -v
+      - name: HTTP pause and resume test
+        timeout-minutes: 3
+        run: python3 -m unittest discover -s tests -p "test_aria2_resume.py" -v
+      - name: HTTP restart and resume test
+        timeout-minutes: 3
+        run: python3 -m unittest discover -s tests -p "test_aria2_restart_resume.py" -v
