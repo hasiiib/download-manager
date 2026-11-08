@@ -179,6 +179,12 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        // Flush any throttled progress checkpoint before the engine terminates.
+        if let Ok(entries) = self.downloads.lock() {
+            if let Err(error) = save_json(&self.data_dir.join("downloads.json"), &*entries) {
+                eprintln!("Unable to save download history during shutdown: {error}");
+            }
+        }
         if let Ok(mut child) = self.child.lock() {
             // On Linux/macOS, SIGTERM lets aria2 persist its session on shutdown.
             // After a short grace period, force-kill to avoid hanging app exit.
