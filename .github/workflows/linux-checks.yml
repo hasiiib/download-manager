@@ -24,6 +24,8 @@ jobs:
         run: bash scripts/doctor.sh
       - name: Validate version and Tauri packaging configuration
         run: python3 -m unittest discover -s tests -p "test_project_config.py" -v
+      - name: Validate Debian package checker unit tests
+        run: python3 -m unittest discover -s tests -p "test_deb_checker.py" -v
       - name: Install frontend dependencies
         run: npm install
       - name: Generate Tauri icon before CLI checks
