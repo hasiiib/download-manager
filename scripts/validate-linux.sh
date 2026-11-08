@@ -9,14 +9,19 @@ bash scripts/doctor.sh
 echo '== Generate Tauri icon =='
 python3 scripts/generate_icon.py
 
+echo '== Resolve dependency lockfiles =='
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+npm ci --no-audit --no-fund
+cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+
 echo '== TypeScript and Vite build =='
 npm run build
 
 echo '== Rust backend build check =='
-cargo check --manifest-path src-tauri/Cargo.toml
+cargo check --locked --manifest-path src-tauri/Cargo.toml
 
 echo '== Rust unit tests =='
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 
 echo '== Project configuration tests =='
 python3 -m unittest discover -s tests -p 'test_project_config.py' -v
