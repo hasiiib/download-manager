@@ -4,10 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,5 +30,5 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
-      - name: Local aria2 RPC integration test
+      - name: Local aria2 RPC and pause/resume integration tests
         run: python3 -m unittest discover -s tests -p "test_*.py" -v
