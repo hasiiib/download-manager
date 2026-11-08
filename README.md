@@ -217,3 +217,11 @@ This only verifies the icon-generation logic and configuration in source. A full
 - Added Rust unit coverage for the distinction between live and historical status polling.
 
 The changes above have been committed, but the Linux CI connector has not provided a passing build result. The app remains a development preview.
+
+## History checkpointing improvements
+
+The transfer-status screen refreshes roughly every 1.5 seconds, but persisting the entire JSON history for every changed byte counter created excessive write amplification with active downloads. The Rust backend now checkpoints progress-only changes at most once every ten seconds, while immediately saving lifecycle changes (new/removed jobs, status, source, torrent identification, path, filename or errors). The latest in-memory history is flushed again during normal engine teardown. aria2 maintains its own session file separately.
+
+A Rust unit test checks that speed/byte changes are throttled while status and filename changes trigger immediate persistence. Unexpected process termination or power loss may still lose progress metadata from the most recent few seconds; this is not a guarantee of crash-proof persistence.
+
+**Verification status:** These are source changes. Full Ubuntu compilation, download integration tests and installer checks still require a successful CI run.
