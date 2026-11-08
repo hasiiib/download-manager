@@ -286,3 +286,9 @@ The Debian payload verifier also fixes regex escaping for expected package versi
 - The Debian payload checker reads the expected app name and version from `package.json` rather than hardcoding `0.2.0`, and new unit tests reject wrong package names or release versions.
 
 **Release gate remains open:** A real passing GitHub Actions run, reviewed committed lockfiles, and Ubuntu installer launch/download smoke tests are still outstanding.
+
+## Debian archive smoke-test coverage
+
+The package-checker test suite now creates a minimal real Debian archive locally with `dpkg-deb --build`, then asks the project verifier to inspect its metadata and archive paths without mocks. This checks the real `dpkg-deb --fsys-tarfile` inspection path in addition to the existing rejection tests. The fixture is not the application's real installer, and the test does not execute the packaged app. CI runs this suite before Rust compilation; systems without `dpkg-deb` skip just this archive-specific test.
+
+Reproducibility remains incomplete until actual npm/Cargo lockfiles are committed. Neither an installer artifact nor a passing Ubuntu CI result has been confirmed here.
