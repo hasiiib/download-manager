@@ -312,3 +312,9 @@ bash scripts/ubuntu-qa.sh
 The script requires no `sudo`, installs no operating-system packages, and stops at the first failure. It checks prerequisites, generates the icon, installs frontend npm dependencies, runs the TypeScript/Vite build, checks/tests the Rust backend, and runs the Python configuration and Debian-checker suites. Separate logs are saved under `/tmp/download-manager-qa.*`; the last 25 lines of a failed step appear in the terminal.
 
 Send the failed step's output to the developer, but review it first for passwords, private URLs or tokens. If the script completes, try `npm run tauri -- build --bundles deb`, then share the result and any build error. Running the script alone does not establish that the packaged desktop app launches successfully.
+
+## Ubuntu 26.04 Rust compilation feedback (November 2026)
+
+A contributor's real Ubuntu QA run confirmed that the environment prerequisite, icon-generation, npm dependency, and TypeScript/Vite build steps pass with Node.js 22.22.1 and aria2 1.37.0. The first Rust compile exposed missing reqwest JSON methods and a Tauri setup error-conversion mismatch. The source now enables the `reqwest/json` feature and aligns the `Engine::start` error type with Tauri's setup callback. The QA script prints compiler error summaries when Rust still fails.
+
+The Rust fixes are **not yet confirmed passing**; repeat `git pull origin main && bash scripts/ubuntu-qa.sh` on the Ubuntu machine. If it fails, share the output (after removing any private URLs or credentials). Do not mark the installer ready until Rust compilation, tests, packaging, and desktop launch pass.
