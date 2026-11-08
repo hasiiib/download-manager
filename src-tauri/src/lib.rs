@@ -74,7 +74,7 @@ fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), Stri
 }
 
 impl Engine {
-    fn start() -> Result<Self, Box<dyn std::error::Error>> {
+    fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let data_dir = home().join(".local").join("share").join("download-manager");
         fs::create_dir_all(&data_dir)?;
         let settings: Settings = load_json(&data_dir.join("settings.json")).unwrap_or_else(Settings::defaults);
