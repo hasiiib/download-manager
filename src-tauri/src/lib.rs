@@ -742,6 +742,20 @@ async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction:
 }
 
 #[tauri::command]
+async fn check_engine(engine: State<'_, Engine>) -> Result<String, String> {
+    {
+        let mut child = engine.child.lock().map_err(|error| error.to_string())?;
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Err(format!("aria2c exited unexpectedly: {status}. Restart the application."));
+        }
+    }
+    let version = engine.rpc("getVersion", vec![]).await?;
+    version.get("version").and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "aria2 returned no engine version".to_string())
+}
+
+#[tauri::command]
 fn get_settings(engine: State<'_, Engine>) -> Result<Settings, String> {
     Ok(engine.settings.lock().map_err(|e| e.to_string())?.clone())
 }
@@ -930,7 +944,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings
+            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine
         ])
         .run(tauri::generate_context!())
         .expect("error while running Download Manager");
