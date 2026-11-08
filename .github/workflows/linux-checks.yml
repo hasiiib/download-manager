@@ -36,6 +36,16 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
       - name: Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Archive resolved dependency lockfiles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-dependency-lockfiles
+          path: |
+            package-lock.json
+            src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 14
       - name: Python syntax checks
         run: python3 -m compileall -q tests
       - name: Local HTTP checksum smoke test
