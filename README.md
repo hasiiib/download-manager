@@ -318,3 +318,19 @@ Send the failed step's output to the developer, but review it first for password
 A contributor's real Ubuntu QA run confirmed that the environment prerequisite, icon-generation, npm dependency, and TypeScript/Vite build steps pass with Node.js 22.22.1 and aria2 1.37.0. The first Rust compile exposed missing reqwest JSON methods and a Tauri setup error-conversion mismatch. The source now enables the `reqwest/json` feature and aligns the `Engine::start` error type with Tauri's setup callback. The QA script prints compiler error summaries when Rust still fails.
 
 The Rust fixes are **not yet confirmed passing**; repeat `git pull origin main && bash scripts/ubuntu-qa.sh` on the Ubuntu machine. If it fails, share the output (after removing any private URLs or credentials). Do not mark the installer ready until Rust compilation, tests, packaging, and desktop launch pass.
+
+## Desktop opens but controls do not work
+
+The desktop UI now actively checks the local aria2 process and its authenticated JSON-RPC connection every ten seconds. The top status indicator shows **aria2 Connected** or **aria2 Disconnected**, and the download form displays the underlying error when the check fails. aria2 stderr is written to `~/.local/share/download-manager/aria2.stderr.log` with owner-only permissions. Do not share the full log without checking it for private URLs, file paths, or tokens.
+
+On Ubuntu, rebuild and install the newest local package after pulling the change:
+
+```bash
+git pull origin main
+bash scripts/ubuntu-qa.sh
+npm run tauri -- build --bundles deb
+sudo apt install ./src-tauri/target/release/bundle/deb/*.deb
+download-manager
+```
+
+If the app still fails, report what happens when pressing **Settings** and **Add download**, the visible error/status indicator, and the output from `tail -n 30 ~/.local/share/download-manager/aria2.stderr.log` after reviewing it for sensitive information. A successful installer build or install does not itself verify downloads or GUI interactions.
