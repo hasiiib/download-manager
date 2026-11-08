@@ -186,10 +186,37 @@ fn validate_source(input: &str) -> Result<(), String> {
     if input.chars().any(|ch| ch == '\n' || ch == '\r' || ch == '\0') {
         return Err("Download source contains invalid characters".into());
     }
-    if input.starts_with("magnet:?") && !input.contains("xt=urn:btih:") && !input.contains("xt=urn:btmh:") {
-        return Err("Magnet link has no recognized BitTorrent info hash".into());
+    if input.starts_with("magnet:?") {
+        if !input.split('&').any(|part| {
+            part.strip_prefix("magnet:?xt=urn:btih:").is_some_and(|hash| !hash.is_empty())
+                || part.strip_prefix("xt=urn:btih:").is_some_and(|hash| !hash.is_empty())
+                || part.strip_prefix("magnet:?xt=urn:btmh:").is_some_and(|hash| !hash.is_empty())
+                || part.strip_prefix("xt=urn:btmh:").is_some_and(|hash| !hash.is_empty())
+        }) {
+            return Err("Magnet link has no recognized BitTorrent info hash".into());
+        }
+        return Ok(());
+    }
+    if input.contains("://") {
+        let parsed = url::Url::parse(input).map_err(|_| "Invalid download URL")?;
+        if !matches!(parsed.scheme(), "http" | "https" | "ftp" | "file") {
+            return Err("Only HTTP, HTTPS, FTP, magnet links and local torrent/metalink files are supported".into());
+        }
+        if parsed.scheme() == "file" {
+            let path = parsed.to_file_path().map_err(|_| "Invalid local file URL")?;
+            if !is_metadata_file(&path) { return Err("Only torrent and metalink files can be imported locally".into()); }
+        } else if parsed.host_str().is_none() {
+            return Err("Download URL has no host".into());
+        }
+    } else if !is_metadata_file(std::path::Path::new(input)) {
+        return Err("Select a .torrent, .meta4 or .metalink file, or enter a supported URL".into());
     }
     Ok(())
+}
+
+fn is_metadata_file(path: &std::path::Path) -> bool {
+    matches!(path.extension().and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase()).as_deref(), Some("torrent" | "meta4" | "metalink"))
 }
 
 async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
@@ -546,6 +573,11 @@ mod tests {
         assert!(validate_source("https://example.org/one.zip\\ntwo.zip").is_err());
         assert!(validate_source("https://example.org/file.zip").is_ok());
         assert!(validate_source("magnet:?xt=urn:btih:abcdef123").is_ok());
+        assert!(validate_source("https://example.org/file.zip").is_ok());
+        assert!(validate_source("sftp://example.org/file.zip").is_err());
+        assert!(validate_source("not-a-url.zip").is_err());
+        assert!(validate_source("/tmp/test.TORRENT").is_ok());
+        assert!(validate_source("file:///tmp/test.torrent").is_ok());
     }
     #[test]
     fn json_round_trip_keeps_download_identifiers() {
