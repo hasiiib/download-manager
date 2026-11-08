@@ -162,8 +162,14 @@ fn save_json<T: Serialize + serde::de::DeserializeOwned>(path: &std::path::Path,
     };
     if let Some(current) = previous {
         // A syntactically valid JSON object might still have the wrong schema.
-        // Only preserve backups that deserialize to this exact document type.
-        if serde_json::from_slice::<T>(&current).is_ok() {
+        // Settings also require semantic validation before replacing the backup.
+        let backup_worthy = if path.file_name().and_then(|part| part.to_str()) == Some("settings.json") {
+            serde_json::from_slice::<Settings>(&current)
+                .is_ok_and(|settings| settings.validate().is_ok())
+        } else {
+            serde_json::from_slice::<T>(&current).is_ok()
+        };
+        if backup_worthy {
             let backup = path.with_extension("bak");
             let backup_tmp = path.with_extension("bak.tmp");
             let mut backup_file = fs::OpenOptions::new().create(true).write(true)
@@ -829,6 +835,12 @@ mod tests {
         invalid.concurrent = 0;
         fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
         assert_eq!(load_validated_settings(&path).unwrap().concurrent, settings.concurrent);
+        // Persisting a repaired settings document must not replace the good
+        // backup with the invalid-but-parseable old primary.
+        save_json(&path, &settings).unwrap();
+        assert!(load_json::<Settings>(&path.with_extension("bak")).unwrap()
+            .unwrap().validate().is_ok());
+        fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
         fs::write(&path.with_extension("bak"), serde_json::to_vec(&invalid).unwrap()).unwrap();
         assert!(load_validated_settings(&path).is_err());
         fs::remove_dir_all(&folder).unwrap();
