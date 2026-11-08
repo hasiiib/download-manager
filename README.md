@@ -110,3 +110,11 @@ These are **pending acceptance tests**, not results already achieved.
 - Desktop UI has a multiline input for batch queue entry.
 - Added source input tests and a safer early-exit check for the aria2 child process.
 - These changes are committed but still require a passing Linux build and real-world testing.
+
+## Validation and version consistency (November 2026)
+
+- Fixed malformed Rust character literals that prevented compilation in download source validation.
+- New source validation checks supported URI schemes (HTTP, HTTPS, FTP, magnet) and accepts local files only for `.torrent`, `.meta4`, or `.metalink` metadata.
+- Added source-validation regression tests for unsupported SFTP, local file metadata, and malformed input.
+- Aligned the frontend, Cargo and Tauri application versions to `0.2.0`.
+- **Status:** changes have been committed; a green Ubuntu build and end-to-end tests are still required. Do not consider this a release-ready build.
