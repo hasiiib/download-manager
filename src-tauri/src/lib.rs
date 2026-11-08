@@ -635,7 +635,7 @@ mod tests {
     fn rejects_invalid_sources_without_starting_engine() {
         assert!(validate_source("").is_err());
         assert!(validate_source("magnet:?dn=missing").is_err());
-        assert!(validate_source("https://example.org/one.zip\\ntwo.zip").is_err());
+        assert!(validate_source("https://example.org/one.zip\ntwo.zip").is_err());
         assert!(validate_source("https://example.org/file.zip").is_ok());
         assert!(validate_source("magnet:?xt=urn:btih:abcdef123").is_ok());
         assert!(validate_source("https://example.org/file.zip").is_ok());
