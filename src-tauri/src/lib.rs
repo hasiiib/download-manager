@@ -167,6 +167,7 @@ impl Drop for Engine {
             // After a short grace period, force-kill to avoid hanging app exit.
             #[cfg(unix)]
             {
+                if let Ok(Some(_)) = child.try_wait() { return; }
                 let _ = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
                 for _ in 0..20 {
                     if let Ok(Some(_)) = child.try_wait() { return; }
@@ -179,14 +180,21 @@ impl Drop for Engine {
     }
 }
 
-async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
-    let input = source.trim();
+fn validate_source(input: &str) -> Result<(), String> {
     if input.len() > 8192 { return Err("Download source is too long".into()); }
     if input.is_empty() { return Err("Paste a download URL, magnet link or a .torrent/.meta4 path".into()); }
-    if input.chars().any(|ch| ch == '\n' || ch == '\r' || ch == '\0') { return Err("Download source contains invalid characters".into()); }
+    if input.chars().any(|ch| ch == '\\n' || ch == '\\r' || ch == '\\0') {
+        return Err("Download source contains invalid characters".into());
+    }
     if input.starts_with("magnet:?") && !input.contains("xt=urn:btih:") && !input.contains("xt=urn:btmh:") {
         return Err("Magnet link has no recognized BitTorrent info hash".into());
     }
+    Ok(())
+}
+
+async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
+    let input = source.trim();
+    validate_source(input)?;
     let settings = engine.settings.lock().map_err(|e| e.to_string())?.clone();
     let mut opts = json!({
         "dir": settings.download_dir,
@@ -530,6 +538,14 @@ mod tests {
         settings.concurrent = 3;
         settings.speed_limit_kib = 1_048_577;
         assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn rejects_invalid_sources_without_starting_engine() {
+        assert!(validate_source("").is_err());
+        assert!(validate_source("magnet:?dn=missing").is_err());
+        assert!(validate_source("https://example.org/one.zip\\ntwo.zip").is_err());
+        assert!(validate_source("https://example.org/file.zip").is_ok());
+        assert!(validate_source("magnet:?xt=urn:btih:abcdef123").is_ok());
     }
     #[test]
     fn json_round_trip_keeps_download_identifiers() {
