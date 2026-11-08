@@ -26,16 +26,20 @@ jobs:
         run: python3 -m unittest discover -s tests -p "test_project_config.py" -v
       - name: Validate Debian package checker unit tests
         run: python3 -m unittest discover -s tests -p "test_deb_checker.py" -v
-      - name: Install frontend dependencies
-        run: npm install
+      - name: Resolve frontend dependency lockfile
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install exact frontend dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Resolve Rust dependency lockfile
+        run: cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
       - name: Generate Tauri icon before CLI checks
         run: python3 scripts/generate_icon.py
       - name: Typecheck and build frontend
         run: npm run build
       - name: Check Rust backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml
       - name: Rust unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - name: Archive resolved dependency lockfiles
         if: always()
         uses: actions/upload-artifact@v4
