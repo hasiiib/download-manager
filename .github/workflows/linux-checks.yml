@@ -22,6 +22,8 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf aria2
       - name: Check Linux prerequisites
         run: bash scripts/doctor.sh
+      - name: Validate version and Tauri packaging configuration
+        run: python3 -m unittest discover -s tests -p "test_project_config.py" -v
       - name: Install frontend dependencies
         run: npm install
       - name: Typecheck and build frontend
