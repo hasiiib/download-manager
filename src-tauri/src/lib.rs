@@ -305,29 +305,35 @@ impl Engine {
     }
 }
 
-impl Drop for Engine {
-    fn drop(&mut self) {
-        // Flush any throttled progress checkpoint before the engine terminates.
+impl Engine {
+    fn shutdown(&self) {
+        // Exit callbacks run even when managed Tauri state outlives the app.
+        // This is idempotent: Drop may call it after RunEvent::Exit.
         if let Ok(entries) = self.downloads.lock() {
             if let Err(error) = save_json(&self.data_dir.join("downloads.json"), &*entries) {
                 eprintln!("Unable to save download history during shutdown: {error}");
             }
         }
         if let Ok(mut child) = self.child.lock() {
-            // On Linux/macOS, SIGTERM lets aria2 persist its session on shutdown.
-            // After a short grace period, force-kill to avoid hanging app exit.
+            // Only signal the child process this Engine instance spawned.
+            // Never kill unrelated aria2 processes by name or port.
+            if let Ok(Some(_)) = child.try_wait() { return; }
             #[cfg(unix)]
             {
-                if let Ok(Some(_)) = child.try_wait() { return; }
                 let _ = unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
                 for _ in 0..20 {
                     if let Ok(Some(_)) = child.try_wait() { return; }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::thread::sleep(Duration::from_millis(100));
                 }
             }
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -967,6 +973,16 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Download Manager");
+        .build(tauri::generate_context!())
+        .expect("error while building Download Manager")
+        .run(|app_handle, event| {
+            // Managed state is not guaranteed to be dropped before process
+            // termination. Explicitly reap our aria2 child on normal app exit.
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                if let Some(engine) = app_handle.try_state::<Engine>() {
+                    engine.shutdown();
+                }
+            }
+        });
 }
