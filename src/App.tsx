@@ -32,6 +32,13 @@ type Settings = {
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "" };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
+const formatEta = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return "Calculating...";
+  if (seconds < 60) return Math.ceil(seconds) + " sec left";
+  if (seconds < 3600) return Math.ceil(seconds / 60) + " min left";
+  if (seconds < 86400) return Math.floor(seconds / 3600) + " hr " + Math.ceil(seconds % 3600 / 60) + " min left";
+  return "Over a day left";
+};
 const isTorrent = (item: DownloadItem) => item.isTorrent || item.source.startsWith("magnet:") || /\.(torrent)(\?|$)/i.test(item.source);
 const activeState = (s: string) => ["active", "waiting", "paused"].includes(s);
 const filtered = (d: DownloadItem, filter: Filter) => filter === "all" ||
@@ -241,7 +248,7 @@ export default function App() {
             <div className="file-info"><strong title={item.source}>{item.name}</strong><small title={item.error || item.path || item.source}>{item.error || item.path || item.source}</small><div className="progress"><span style={{ width: item.status === "complete" ? "100%" : item.totalLength ? Math.min(100, item.completedLength / item.totalLength * 100) + "%" : "0%" }} /></div></div>
             <div className="row-meta"><span className={"status " + item.status}><StatusIcon status={item.status}/> {item.status}</span>
               <small>{formatSize(item.completedLength)}{item.totalLength ? " / " + formatSize(item.totalLength) : ""}</small>
-              {item.status === "active" && <small>{formatSize(item.downloadSpeed)}/s</small>}</div>
+              {item.status === "active" && <><small>{formatSize(item.downloadSpeed)}/s</small>{item.totalLength > item.completedLength && item.downloadSpeed > 0 && <small>{formatEta((item.totalLength - item.completedLength) / item.downloadSpeed)}</small>}</>}</div>
             <div className="row-actions">
               {isTorrent(item) && item.status !== "removed" && <button title="Choose files in torrent" aria-label={"Torrent files " + item.name} onClick={() => void showTorrentFiles(item)}><FolderOpen size={17}/></button>}
               {item.status === "waiting" && <><button title="Move to top of queue" aria-label={"Prioritize " + item.name} onClick={() => void moveQueue(item.gid, "top")}><ArrowUpToLine size={17}/></button><button title="Move to bottom of queue" aria-label={"Deprioritize " + item.name} onClick={() => void moveQueue(item.gid, "bottom")}><QueueBottomIcon size={17}/></button></>}
