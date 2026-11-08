@@ -222,6 +222,13 @@ impl Engine {
         // Construct fallible dependencies before spawning aria2. Otherwise a
         // TLS/client initialization error could leave an unmanaged child alive.
         let client = reqwest::Client::builder().no_proxy().build()?;
+        // Keep startup failures visible without leaking them into a public log.
+        // The containing app-data directory is already mode 0700.
+        let stderr_path = data_dir.join("aria2.stderr.log");
+        let stderr_file = fs::OpenOptions::new()
+            .create(true).write(true).truncate(true).open(&stderr_path)?;
+        #[cfg(unix)]
+        fs::set_permissions(&stderr_path, fs::Permissions::from_mode(0o600))?;
         let child = Command::new("aria2c")
             .arg("--no-conf=true")
             .arg("--enable-rpc=true")
@@ -244,7 +251,7 @@ impl Engine {
             .arg("--bt-save-metadata=true")
             .arg("--seed-time=0")
             .arg("--console-log-level=warn")
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::from(stderr_file))
             .spawn().map_err(|error| std::io::Error::new(error.kind(),
                 format!("Could not start aria2c ({error}). Install it with: sudo apt install aria2")))?;
         Ok(Self {
