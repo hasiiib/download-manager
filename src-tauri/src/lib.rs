@@ -2,7 +2,9 @@ use base64::Engine as _;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
+use std::{collections::BTreeMap, fs, io::Write, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use tauri::State;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -81,14 +83,34 @@ fn load_json<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T
 fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-    fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    fs::rename(tmp, path).map_err(|e| e.to_string())
+    // Write a complete temporary document first. Never truncate the last
+    // successfully committed history/settings file on a partial write.
+    let mut file = fs::OpenOptions::new().create(true).write(true).truncate(true)
+        .open(&tmp).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))
+        .map_err(|e| e.to_string())?;
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|e| e.to_string())?;
+    drop(file);
+    fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        // Sync the rename's directory entry for better durability after a crash.
+        fs::File::open(parent).and_then(|dir| dir.sync_all())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 impl Engine {
     fn start() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let data_dir = home().join(".local").join("share").join("download-manager");
         fs::create_dir_all(&data_dir)?;
+        // URLs and torrent metadata can include private credentials; keep
+        // app-managed state inaccessible to other local Unix users.
+        #[cfg(unix)]
+        fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))?;
         let settings: Settings = load_json(&data_dir.join("settings.json")).unwrap_or_else(Settings::defaults);
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
@@ -664,6 +686,24 @@ fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn json_save_replaces_document_without_leaving_partial_file() {
+        let folder = std::env::temp_dir().join(format!("download-manager-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("history.json");
+        let mut first = BTreeMap::new();
+        first.insert("old", 1_u32);
+        save_json(&path, &first).unwrap();
+        let mut second = BTreeMap::new();
+        second.insert("new", 2_u32);
+        save_json(&path, &second).unwrap();
+        assert_eq!(load_json::<BTreeMap<String, u32>>(&path).unwrap(), second);
+        assert!(!path.with_extension("tmp").exists());
+        #[cfg(unix)]
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        fs::remove_dir_all(&folder).unwrap();
+    }
+
     #[test]
     fn validates_connection_limits() {
         let mut settings = Settings::defaults();
