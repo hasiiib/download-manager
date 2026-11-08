@@ -274,6 +274,9 @@ async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
     let item = Download { gid, source: input.to_string(), is_torrent: input.starts_with("magnet:") || input.to_ascii_lowercase().contains(".torrent"), name, status: "waiting".into(), completed_length: 0,
         total_length: 0, download_speed: 0, upload_speed: 0, path: String::new(), error: None };
     engine.remember(item.clone())?;
+    // Persist queue state immediately. If disk saving fails, do not report an
+    // enqueue failure: aria2 has already accepted the transfer.
+    let _ = engine.rpc("saveSession", vec![]).await;
     Ok(item)
 }
 
@@ -425,6 +428,8 @@ async fn control_download(engine: State<'_, Engine>, gid: String, action: String
         _ => return Err("Unsupported action".into()),
     };
     engine.rpc(method, vec![json!(gid.clone())]).await?;
+    // aria2 can restore paused and waiting transfers from a saved session.
+    let _ = engine.rpc("saveSession", vec![]).await;
     if action == "cancel" {
         let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
         if let Some(entry) = entries.get_mut(&gid) { entry.status = "removed".into(); }
@@ -560,6 +565,7 @@ async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction:
     }
     let how = if direction == "top" { "POS_SET" } else { "POS_END" };
     engine.rpc("changePosition", vec![json!(gid), json!(position), json!(how)]).await?;
+    let _ = engine.rpc("saveSession", vec![]).await;
     Ok(())
 }
 
