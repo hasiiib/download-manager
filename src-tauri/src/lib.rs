@@ -2,7 +2,7 @@ use base64::Engine as _;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex};
+use std::{collections::BTreeMap, fs, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
 use tauri::State;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
@@ -55,6 +55,18 @@ struct Engine {
     downloads: Mutex<BTreeMap<String, Download>>,
     settings: Mutex<Settings>,
     data_dir: PathBuf,
+    last_history_save: Mutex<Instant>,
+}
+
+/// Persist immediately for lifecycle/identity changes; ordinary byte and speed
+/// updates can be checkpointed periodically without excessive disk writes.
+fn requires_immediate_history_save(old: &Download, new: &Download) -> bool {
+    old.status != new.status
+        || old.source != new.source
+        || old.name != new.name
+        || old.is_torrent != new.is_torrent
+        || old.path != new.path
+        || old.error != new.error
 }
 
 fn home() -> PathBuf {
@@ -128,6 +140,7 @@ impl Engine {
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
             settings: Mutex::new(settings), data_dir,
+            last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
 
@@ -390,13 +403,32 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     // Store completed state and filenames for display after restarting the application.
     if let Ok(mut entries) = engine.downloads.lock() {
         let mut changed = false;
+        let mut urgent = false;
         for item in &updated {
-            if entries.get(&item.gid) != Some(item) {
-                entries.insert(item.gid.clone(), item.clone());
-                changed = true;
+            match entries.get(&item.gid) {
+                Some(old) if old == item => {}
+                Some(old) => {
+                    urgent |= requires_immediate_history_save(old, item);
+                    entries.insert(item.gid.clone(), item.clone());
+                    changed = true;
+                }
+                None => {
+                    urgent = true;
+                    entries.insert(item.gid.clone(), item.clone());
+                    changed = true;
+                }
             }
         }
-        if changed { let _ = save_json(&engine.data_dir.join("downloads.json"), &*entries); }
+        if changed {
+            if let Ok(mut last_save) = engine.last_history_save.lock() {
+                if urgent || last_save.elapsed() >= Duration::from_secs(10) {
+                    match save_json(&engine.data_dir.join("downloads.json"), &*entries) {
+                        Ok(()) => *last_save = Instant::now(),
+                        Err(error) => eprintln!("Unable to persist download history: {error}"),
+                    }
+                }
+            }
+        }
     }
     Ok(updated)
 }
@@ -639,6 +671,24 @@ mod tests {
         settings.concurrent = 3;
         settings.speed_limit_kib = 1_048_577;
         assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn history_checkpoint_prioritizes_state_changes_over_speed_updates() {
+        let item = Download {
+            gid: "one".into(), source: "https://example.org/file".into(),
+            is_torrent: false, name: "file".into(), status: "active".into(),
+            completed_length: 100, total_length: 200, download_speed: 10,
+            upload_speed: 0, path: "/tmp/file".into(), error: None,
+        };
+        let mut changed = item.clone();
+        changed.download_speed = 99;
+        changed.completed_length = 150;
+        assert!(!requires_immediate_history_save(&item, &changed));
+        changed.status = "complete".into();
+        assert!(requires_immediate_history_save(&item, &changed));
+        changed.status = "active".into();
+        changed.name = "renamed".into();
+        assert!(requires_immediate_history_save(&item, &changed));
     }
     #[test]
     fn does_not_poll_historical_downloads() {
