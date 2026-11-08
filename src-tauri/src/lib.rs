@@ -777,6 +777,13 @@ mod tests {
         save_json(&path, &second).unwrap();
         assert_eq!(load_json::<BTreeMap<String, u32>>(&path.with_extension("bak"))
             .unwrap().unwrap(), first);
+        // If the primary is absent and the remaining backup is unusable,
+        // starting with empty history would hide an existing recovery problem.
+        fs::remove_file(&path).unwrap();
+        fs::write(path.with_extension("bak"), b"[]").unwrap();
+        assert!(load_json::<BTreeMap<String, u32>>(&path).is_err());
+        save_json(&path, &second).unwrap();
+        fs::write(path.with_extension("bak"), serde_json::to_vec(&first).unwrap()).unwrap();
         fs::write(&path, b"{still-broken").unwrap();
         fs::write(path.with_extension("bak"), b"{also-broken").unwrap();
         assert!(load_json::<BTreeMap<String, u32>>(&path).is_err());
