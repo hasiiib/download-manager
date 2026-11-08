@@ -119,7 +119,12 @@ fn save_json<T: Serialize>(path: &std::path::Path, value: &T) -> Result<(), Stri
     drop(file);
     // Retain the previous valid snapshot before committing a replacement.
     // Never overwrite a known-good backup with a corrupt primary.
-    if let Ok(current) = fs::read(path) {
+    let previous = match fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("Cannot back up {}: {error}", path.display())),
+    };
+    if let Some(current) = previous {
         if serde_json::from_slice::<Value>(&current).is_ok() {
             let backup = path.with_extension("bak");
             let backup_tmp = path.with_extension("bak.tmp");
