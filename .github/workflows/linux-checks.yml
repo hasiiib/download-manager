@@ -26,6 +26,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p "test_project_config.py" -v
       - name: Install frontend dependencies
         run: npm install
+      - name: Generate Tauri icon before CLI checks
+        run: python3 scripts/generate_icon.py
       - name: Typecheck and build frontend
         run: npm run build
       - name: Check Rust backend
