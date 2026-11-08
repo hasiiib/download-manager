@@ -61,10 +61,17 @@ jobs:
             exit 1
           fi
           python3 scripts/check_deb.py "${packages[0]}"
-      - name: Upload Debian installer
+      - name: Generate installer SHA-256 checksum
+        run: |
+          cd src-tauri/target/release/bundle/deb
+          sha256sum ./*.deb > SHA256SUMS
+          cat SHA256SUMS
+      - name: Upload Debian installer and checksum
         uses: actions/upload-artifact@v4
         with:
           name: download-manager-ubuntu-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/deb/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
