@@ -374,6 +374,28 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
 }
 
 #[tauri::command]
+async fn retry_download(engine: State<'_, Engine>, gid: String) -> Result<Download, String> {
+    let original = engine.downloads.lock().map_err(|e| e.to_string())?
+        .get(&gid).cloned().ok_or("Unknown download")?;
+    if !matches!(original.status.as_str(), "error" | "removed" | "interrupted") {
+        return Err("This download cannot be retried. Use Resume for paused transfers.".into());
+    }
+    // A restored aria2 session may already be running the same GID. Never start a
+    // second transfer if the engine has recovered the original download.
+    if let Ok(status) = engine.rpc("tellStatus", vec![json!(gid.clone())]).await {
+        if matches!(status.get("status").and_then(Value::as_str),
+            Some("active" | "waiting" | "paused")) {
+            return Err("The original transfer is still in the engine; resume it instead".into());
+        }
+    }
+    let replacement = enqueue(&engine, original.source.clone()).await?;
+    let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
+    entries.remove(&gid);
+    save_json(&engine.data_dir.join("downloads.json"), &*entries)?;
+    Ok(replacement)
+}
+
+#[tauri::command]
 async fn control_download(engine: State<'_, Engine>, gid: String, action: String) -> Result<(), String> {
     if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
         return Err("Unknown download".into());
@@ -608,7 +630,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings
+            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running Download Manager");
