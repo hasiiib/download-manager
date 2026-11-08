@@ -16,6 +16,10 @@ run_step() {
   else
     local code=$?
     printf '[FAIL] %s (exit code %s)\n' "$name" "$code"
+    if [[ "$name" == rust-* ]]; then
+      printf 'Rust error summary:\n'
+      grep -n -E '^error(\\[[A-Z][0-9]+\\])?:|^ *--> src/' "$log" | head -n 35 || true
+    fi
     printf 'Last 25 lines of %s:\n' "$log"
     tail -n 25 "$log"
     return 1
