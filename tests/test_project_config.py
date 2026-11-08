@@ -25,7 +25,7 @@ class TestProjectConfiguration(unittest.TestCase):
         self.assertNotIn("icons", bundle, "Tauri uses bundle.icon, not bundle.icons")
         self.assertEqual(bundle["icon"], ["icons/icon.png"])
         generator = (ROOT / "src-tauri/build.rs").read_text(encoding="utf-8")
-        self.assertIn('folder.join("icon.png")', generator)
+        self.assertIn('dir.join("icon.png")', generator)
 
     def test_ubuntu_installer_requires_aria2(self):
         self.assertIn("aria2", self.tauri["bundle"]["linux"]["deb"]["depends"])
