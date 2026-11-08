@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Inspect a generated Debian package without installing or executing it."""
+import json
 import pathlib
 import re
 import subprocess
@@ -30,10 +31,14 @@ def validate(package: pathlib.Path) -> None:
     version = field(package, "Version")
     dependencies = field(package, "Depends")
     print(f"Package: {name}\nVersion: {version}\nDepends: {dependencies}")
-    if name != "download-manager":
-        raise ValueError(f"Unexpected package name: {name}")
-    if not re.fullmatch(r"0\.2\.0(?:[-+].+)?", version):
-        raise ValueError(f"Unexpected package version: {version}")
+    manifest_path = pathlib.Path(__file__).resolve().parents[1] / "package.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    expected_name = manifest["name"]
+    expected_version = manifest["version"]
+    if name != expected_name:
+        raise ValueError(f"Unexpected package name: {name}; expected {expected_name}")
+    if not re.fullmatch(re.escape(expected_version) + r"(?:[-+].+)?", version):
+        raise ValueError(f"Unexpected package version: {version}; expected {expected_version}")
     if not re.search(r"(?:^|,)\s*aria2(?:\s*\([^)]*\))?(?:\s*,|$)", dependencies):
         raise ValueError("Installer does not declare aria2 dependency")
 
