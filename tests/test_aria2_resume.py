@@ -23,6 +23,16 @@ PAYLOAD = bytes(range(256)) * 16384  # 4 MiB, deterministic content
 class SlowRangeHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
+    def do_HEAD(self):
+        if self.path != "/range.bin":
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(len(PAYLOAD)))
+        self.end_headers()
+
     def do_GET(self):
         if self.path != "/range.bin":
             self.send_error(404)
