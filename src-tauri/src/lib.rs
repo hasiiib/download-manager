@@ -183,7 +183,7 @@ async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
     let input = source.trim();
     if input.len() > 8192 { return Err("Download source is too long".into()); }
     if input.is_empty() { return Err("Paste a download URL, magnet link or a .torrent/.meta4 path".into()); }
-    if input.contains(['\n', '\r', '\0']) { return Err("Download source contains invalid characters".into()); }
+    if input.chars().any(|ch| ch == '\n' || ch == '\r' || ch == '\0') { return Err("Download source contains invalid characters".into()); }
     if input.starts_with("magnet:?") && !input.contains("xt=urn:btih:") && !input.contains("xt=urn:btmh:") {
         return Err("Magnet link has no recognized BitTorrent info hash".into());
     }
