@@ -138,3 +138,11 @@ These are **pending acceptance tests**, not results already achieved.
 - Interrupted transfers are visible in the Failed filter.
 
 The changes require real Ubuntu compilation and restart/transfer tests before they are considered release ready.
+
+## Session recovery hardening
+
+The automated Ubuntu integration suite now includes `tests/test_aria2_session.py`. It launches aria2 twice against a local temporary session file and checks that a paused queued URI is restored under its original GID. This complements the local HTTP download/checksum test.
+
+The desktop engine now explicitly requests `aria2.saveSession` after accepting downloads, pausing/resuming/cancelling and reordering queued jobs, in addition to periodic automatic saves. Save failures are treated as warnings *after* a download has started, rather than reported as a failed enqueue that users might duplicate.
+
+**Still unverified:** resume of an interrupted partially-downloaded HTTP file and real BitTorrent payload recovery; those need additional tests and a successful Ubuntu CI run. The repository connector has not reported a passing CI check yet.
