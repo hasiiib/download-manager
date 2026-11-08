@@ -158,3 +158,17 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 The Linux CI workflow also offers a manual `workflow_dispatch` trigger and executes the same suite after TypeScript and Rust checks. **These are committed tests, not proof they have passed.** A confirmed passing GitHub Actions run and actual desktop testing remain necessary. The suite now also includes `tests/test_aria2_restart_resume.py`: it pauses a partially downloaded local file, saves the aria2 session, completely restarts the engine, resumes the same GID, and compares the final file SHA-256. This test has been committed but a passing run has not yet been confirmed.
+
+## Linux validation command
+
+On a machine with the Ubuntu build prerequisites installed, run the consolidated local validation from the repository root:
+
+```bash
+bash scripts/validate-linux.sh
+```
+
+It runs the environment doctor, TypeScript build, Rust check and unit tests, Python syntax checks, and **four separately reported** aria2 integration tests (local HTTP checksum, queued-session restoration, in-process pause/resume, and partial-file recovery after engine restart).
+
+The GitHub workflow now isolates each integration test in its own time-limited step for more actionable failure diagnosis. The Tauri engine startup returns thread-safe errors for integration with its setup callback.
+
+**Verification caveat:** these checks have been committed, but no passing Linux CI result or user-machine end-to-end test has been confirmed. Tests should not be reported as passing merely because they exist.
