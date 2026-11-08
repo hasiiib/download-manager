@@ -292,3 +292,9 @@ The Debian payload verifier also fixes regex escaping for expected package versi
 The package-checker test suite now creates a minimal real Debian archive locally with `dpkg-deb --build`, then asks the project verifier to inspect its metadata and archive paths without mocks. This checks the real `dpkg-deb --fsys-tarfile` inspection path in addition to the existing rejection tests. The fixture is not the application's real installer, and the test does not execute the packaged app. CI runs this suite before Rust compilation; systems without `dpkg-deb` skip just this archive-specific test.
 
 Reproducibility remains incomplete until actual npm/Cargo lockfiles are committed. Neither an installer artifact nor a passing Ubuntu CI result has been confirmed here.
+
+## Streaming installer verification
+
+`scripts/check_deb.py` now streams the Debian package's uncompressed tar entries directly from `dpkg-deb --fsys-tarfile` rather than loading the complete package payload into memory. The error handling reports an invalid archive instead of presenting an unhandled traceback. Regression coverage includes a deliberately corrupted archive and an actual locally assembled Debian fixture.
+
+The streaming inspection and corrupt-archive rejection were exercised locally with `dpkg-deb`. This is **not** a passing Rust compile, Tauri installer build, or successful Ubuntu desktop launch. Real npm and Cargo lockfiles are still missing from the repository, and a green GitHub Actions run is still needed before release.
