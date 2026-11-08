@@ -250,3 +250,11 @@ If both copies are invalid, startup still fails with an explicit error instead o
 - Rust regression coverage now includes missing-primary recovery, invalid backup contents, and incompatible JSON document structures.
 
 **Verification:** These safeguards are committed but the repository's Rust compilation and Ubuntu installer workflow have not yet returned a confirmed passing status. Do not regard them as proven until CI and real-machine restart tests pass.
+
+## Invalid settings recovery (November 2026)
+
+Settings can be syntactically valid JSON yet unusable, such as a saved concurrency limit of zero. App startup now checks settings constraints, falls back to a valid `settings.bak` snapshot if the primary fails validation, and preserves the original for diagnosis. If the primary and backup both fail validation, startup reports the issue instead of silently resetting preferences.
+
+When saving repaired settings, the previous file is eligible to replace `settings.bak` only if it passes both JSON schema decoding and settings value validation. A Rust regression test checks recovery and verifies an invalid primary cannot overwrite the last good backup.
+
+These changes are committed, but the Ubuntu build and aria2 integration suite still lack a confirmed passing run.
