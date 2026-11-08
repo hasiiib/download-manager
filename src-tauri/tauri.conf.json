@@ -27,15 +27,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icons": [
-      "icons/icon.png"
-    ],
     "linux": {
       "deb": {
         "depends": [
           "aria2"
         ]
       }
-    }
+    },
+    "icon": [
+      "icons/icon.png"
+    ]
   }
 }
