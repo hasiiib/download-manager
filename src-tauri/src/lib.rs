@@ -217,6 +217,11 @@ fn validate_source(input: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn is_missing_gid_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("gid") && normalized.contains("not found")
+}
+
 fn is_metadata_file(path: &std::path::Path) -> bool {
     matches!(path.extension().and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase()).as_deref(), Some("torrent" | "meta4" | "metalink"))
@@ -352,7 +357,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             if item.status == "error" {
                 item.error = status.get("errorMessage").and_then(Value::as_str).map(str::to_string);
             }
-        } else if result.as_ref().err().is_some_and(|error| error.contains("GID") && error.contains("not found")) {
+        } else if result.as_ref().err().is_some_and(|error| is_missing_gid_error(error)) {
             if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
                 item.status = "interrupted".into();
             }
@@ -386,10 +391,19 @@ async fn retry_download(engine: State<'_, Engine>, gid: String) -> Result<Downlo
     }
     // A restored aria2 session may already be running the same GID. Never start a
     // second transfer if the engine has recovered the original download.
-    if let Ok(status) = engine.rpc("tellStatus", vec![json!(gid.clone())]).await {
-        if matches!(status.get("status").and_then(Value::as_str),
-            Some("active" | "waiting" | "paused")) {
-            return Err("The original transfer is still in the engine; resume it instead".into());
+    match engine.rpc("tellStatus", vec![json!(gid.clone())]).await {
+        Ok(status) => {
+            if matches!(status.get("status").and_then(Value::as_str),
+                Some("active" | "waiting" | "paused")) {
+                return Err("The original transfer is still in the engine; resume it instead".into());
+            }
+        }
+        Err(error) if is_missing_gid_error(&error) => {
+            // The old identifier is absent; it is safe to submit a fresh job.
+        }
+        Err(error) => {
+            // A timeout or disconnected RPC must never turn into a duplicate transfer.
+            return Err(format!("Cannot check whether this transfer recovered: {error}"));
         }
     }
     let replacement = enqueue(&engine, original.source.clone()).await?;
@@ -597,6 +611,13 @@ mod tests {
         settings.concurrent = 3;
         settings.speed_limit_kib = 1_048_577;
         assert!(settings.validate().is_err());
+    }
+    #[test]
+    fn missing_gid_detection_only_accepts_confirmed_not_found() {
+        assert!(is_missing_gid_error("GID abcd is not found"));
+        assert!(is_missing_gid_error("gid abc NOT FOUND"));
+        assert!(!is_missing_gid_error("Connection refused"));
+        assert!(!is_missing_gid_error("Request timed out"));
     }
     #[test]
     fn rejects_invalid_sources_without_starting_engine() {
