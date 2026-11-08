@@ -21,6 +21,9 @@ cargo test --manifest-path src-tauri/Cargo.toml
 echo '== Project configuration tests =='
 python3 -m unittest discover -s tests -p 'test_project_config.py' -v
 
+echo '== Debian inspector unit tests =='
+python3 -m unittest discover -s tests -p 'test_deb_checker.py' -v
+
 echo '== Python test file syntax =='
 python3 -m compileall -q tests
 
