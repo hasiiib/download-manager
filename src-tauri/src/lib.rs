@@ -1,5 +1,5 @@
 use base64::Engine as _;
-use futures_util::future::join_all;
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, fs, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex};
@@ -306,10 +306,12 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     let mut discovered = Vec::new();
     // Poll transfers concurrently rather than serially: a slow RPC response should not
     // delay every subsequent transfer in the queue.
-    let statuses = join_all(snapshot.into_iter().map(|item| async {
+    // Bounded, ordered concurrency keeps hundreds of downloads from flooding the
+    // local RPC server while preserving a stable row order.
+    let statuses: Vec<_> = stream::iter(snapshot.into_iter().map(|item| async {
         let status = engine.rpc("tellStatus", vec![json!(item.gid)]).await;
         (item, status)
-    })).await;
+    })).buffered(8).collect().await;
     for (mut item, result) in statuses {
         if let Ok(status) = result.as_ref() {
             // aria2 creates a follow-up GID after retrieving magnet/torrent metadata.
