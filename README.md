@@ -225,3 +225,12 @@ The transfer-status screen refreshes roughly every 1.5 seconds, but persisting t
 A Rust unit test checks that speed/byte changes are throttled while status and filename changes trigger immediate persistence. Unexpected process termination or power loss may still lose progress metadata from the most recent few seconds; this is not a guarantee of crash-proof persistence.
 
 **Verification status:** These are source changes. Full Ubuntu compilation, download integration tests and installer checks still require a successful CI run.
+
+## Private and durable local state (November 2026)
+
+- On Linux/other Unix systems the application data directory is restricted to mode `0700`. Persisted settings and download-history JSON files are written with mode `0600`, so other local users cannot read private source URLs and metadata through normal file permissions.
+- JSON persistence now writes to a temporary file, flushes file contents with `sync_all`, atomically renames it, then syncs the containing directory on Unix. The last committed JSON file is not truncated by an incomplete replacement write.
+- A missing settings/history file still means first launch, but malformed or unreadable JSON now produces a visible startup error instead of silently discarding the saved list or restoring default settings. Users should preserve corrupt files for recovery rather than delete them without a backup.
+- A Rust regression test checks replacement saves, missing-vs-corrupt reads, and Unix file permissions.
+
+These changes are committed, but runtime validation on Ubuntu and a passing Linux build are still required. Atomic filesystem replacement reduces damage from interrupted writes; it does not guarantee safety against failing storage hardware.
