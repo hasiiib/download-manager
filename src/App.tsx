@@ -74,6 +74,8 @@ export default function App() {
   const [message, setMessage] = useState("");
   const [working, setWorking] = useState(false);
   const [refreshError, setRefreshError] = useState("");
+  const [engineHealth, setEngineHealth] = useState("Checking engine connection...");
+  const [engineOnline, setEngineOnline] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const refreshing = useRef(false);
 
@@ -95,8 +97,19 @@ export default function App() {
   useEffect(() => {
     void refresh();
     invoke<Settings>("get_settings").then(s => { setSettings(s); setDraft(s); }).catch(e => setMessage(String(e)));
+    let mounted = true;
+    const check = async () => {
+      try {
+        const version = await invoke<string>("check_engine");
+        if (mounted) { setEngineHealth("aria2 " + version + " connected"); setEngineOnline(true); }
+      } catch (error) {
+        if (mounted) { setEngineHealth("Engine unavailable: " + String(error)); setEngineOnline(false); }
+      }
+    };
+    void check();
     const timer = window.setInterval(() => void refresh(), 1500);
-    return () => window.clearInterval(timer);
+    const healthTimer = window.setInterval(() => void check(), 10000);
+    return () => { mounted = false; window.clearInterval(timer); window.clearInterval(healthTimer); };
   }, [refresh]);
 
   const pickTorrent = async () => {
@@ -227,7 +240,7 @@ export default function App() {
       <div className="sidebar-bottom"><div className="side-note"><ShieldCheck size={20}/><div><strong>Private RPC engine</strong><p>aria2 runs on localhost with a private token.</p></div></div><div className="version">DEVELOPMENT PREVIEW · v0.2</div></div>
     </aside>
     <main className="main">
-      <header><div className="crumb">WORKSPACE <span>/</span> DOWNLOADS</div><div className="badge"><span className="dot" /> Ubuntu / aria2 Engine</div></header>
+      <header><div className="crumb">WORKSPACE <span>/</span> DOWNLOADS</div><div className="badge" title={engineHealth}><span className="dot" style={{ background: engineOnline ? "#4dda9b" : "#ff6b7a" }} /> {engineOnline ? "aria2 Connected" : "aria2 Disconnected"}</div></header>
       <section className="heading"><div><div className="eyebrow"><Zap size={14} /> DOWNLOADS, UNDER CONTROL</div><h1>Downloads<span>.</span></h1><p>Manage direct links, torrents and magnet downloads in one place.</p></div></section>
       <section className="stats">
         <div className="stat"><div className="stat-icon violet"><HardDrive size={21}/></div><div><small>All downloads</small><strong>{items.length}</strong></div></div>
@@ -239,6 +252,7 @@ export default function App() {
         <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
         {message && <p className="error" role="alert">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
+        {!engineOnline && <p className="error" role="alert">{engineHealth}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
       </section>
       <section className="list"><div className="list-head"><div><h2>Download activity</h2><p>Pause, resume and monitor active transfers</p></div><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
