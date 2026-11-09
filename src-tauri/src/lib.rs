@@ -610,24 +610,57 @@ async fn retry_download(engine: State<'_, Engine>, gid: String) -> Result<Downlo
     Ok(replacement)
 }
 
+// Validate against the live engine rather than a cached UI status. In
+// particular, aria2 restores paused jobs from a session after restarting.
+fn control_method(action: &str, status: &str) -> Result<&'static str, String> {
+    match (action, status) {
+        ("pause", "active" | "waiting") => Ok("pause"),
+        ("resume", "paused") => Ok("unpause"),
+        ("cancel", "active" | "waiting" | "paused") => Ok("forceRemove"),
+        ("pause", "paused") => Err("This transfer is already paused".into()),
+        ("resume", "active" | "waiting") => Err("This transfer is already running or queued".into()),
+        ("pause" | "resume" | "cancel", "complete") =>
+            Err("This download has already completed".into()),
+        ("pause" | "resume" | "cancel", "error" | "removed") =>
+            Err("This transfer has stopped. Use Retry where available.".into()),
+        ("pause" | "resume" | "cancel", _) => Err("Cannot control a transfer with an unknown state".into()),
+        _ => Err("Unsupported action".into()),
+    }
+}
+
 #[tauri::command]
 async fn control_download(engine: State<'_, Engine>, gid: String, action: String) -> Result<(), String> {
     if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
         return Err("Unknown download".into());
     }
-    let method = match action.as_str() {
-        "pause" => "pause",
-        "resume" => "unpause",
-        "cancel" => "forceRemove",
-        _ => return Err("Unsupported action".into()),
-    };
+    if !matches!(action.as_str(), "pause" | "resume" | "cancel") {
+        return Err("Unsupported action".into());
+    }
+    let live = engine.rpc("tellStatus", vec![json!(gid.clone())]).await?;
+    let status = live.get("status").and_then(Value::as_str).unwrap_or("unknown");
+    let method = control_method(&action, status)?;
     engine.rpc(method, vec![json!(gid.clone())]).await?;
-    // aria2 can restore paused and waiting transfers from a saved session.
-    let _ = engine.rpc("saveSession", vec![]).await;
-    if action == "cancel" {
+
+    // Reflect the operation immediately rather than waiting for the next poll.
+    // Persist state before reporting success, but do not claim RPC failure if
+    // the engine already accepted the action.
+    {
         let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
-        if let Some(entry) = entries.get_mut(&gid) { entry.status = "removed".into(); }
-        save_json(&engine.data_dir.join("downloads.json"), &*entries)?;
+        if let Some(entry) = entries.get_mut(&gid) {
+            entry.status = match action.as_str() {
+                "pause" => "paused",
+                "resume" => "waiting",
+                _ => "removed",
+            }.into();
+            entry.download_speed = 0;
+            entry.upload_speed = 0;
+        }
+        if let Err(error) = save_json(&engine.data_dir.join("downloads.json"), &*entries) {
+            eprintln!("Transfer updated in aria2, but failed to save history: {error}");
+        }
+    }
+    if let Err(error) = engine.rpc("saveSession", vec![]).await {
+        eprintln!("Unable to checkpoint aria2 session after transfer control: {error}");
     }
     Ok(())
 }
@@ -756,6 +789,10 @@ async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction:
     };
     if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
         return Err("Unknown download".into());
+    }
+    let live = engine.rpc("tellStatus", vec![json!(gid.clone())]).await?;
+    if live.get("status").and_then(Value::as_str) != Some("waiting") {
+        return Err("Only waiting downloads can be moved in the queue".into());
     }
     let how = if direction == "top" { "POS_SET" } else { "POS_END" };
     engine.rpc("changePosition", vec![json!(gid), json!(position), json!(how)]).await?;
@@ -943,6 +980,19 @@ mod tests {
         fs::remove_dir_all(folder).unwrap();
     }
 
+    #[test]
+    fn transfer_controls_reject_stale_or_invalid_states() {
+        assert_eq!(control_method("pause", "active").unwrap(), "pause");
+        assert_eq!(control_method("pause", "waiting").unwrap(), "pause");
+        assert_eq!(control_method("resume", "paused").unwrap(), "unpause");
+        assert_eq!(control_method("cancel", "paused").unwrap(), "forceRemove");
+        assert!(control_method("resume", "active").is_err());
+        assert!(control_method("resume", "waiting").is_err());
+        assert!(control_method("pause", "paused").is_err());
+        assert!(control_method("cancel", "complete").is_err());
+        assert!(control_method("pause", "unknown").is_err());
+        assert!(control_method("invalid", "active").is_err());
+    }
     #[test]
     fn validates_connection_limits() {
         let mut settings = Settings::defaults();
