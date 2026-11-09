@@ -223,7 +223,7 @@ export default function App() {
 
   const moveQueue = async (gid: string, direction: "top" | "bottom") => {
     setActionFeedback("");
-    try { await invoke("move_queued_download", { gid, direction }); await refresh(); setActionFeedback("Queue order updated."); }
+    try { await invoke("move_queued_download", { gid, direction }); await refresh(); setActionFeedback("Queue position updated in aria2."); }
     catch (err) { setActionFeedback(String(err)); }
   };
 
