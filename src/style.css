@@ -132,3 +132,8 @@
 /* The former WORKSPACE breadcrumb and connection status header were removed. */
 .main>.heading:first-child{padding-top:17px}
 .engine-notice{margin:5px 0 14px;padding:10px 13px;border:1px solid #704053;border-radius:9px;background:#2b1929;color:#ffb4c0;font-size:12px;overflow-wrap:anywhere}
+
+/* Transfer commands report outcomes beside the rows, not in the offscreen add form. */
+.action-feedback{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;margin:0 0 13px;border:1px solid #404569;border-radius:9px;background:#191d35;color:#d9e2ff;font-size:12px;overflow-wrap:anywhere}
+.action-feedback button{border:0;background:transparent;color:#aeb9d7;display:grid;place-items:center;width:26px;height:26px;flex:none;border-radius:6px;cursor:pointer}
+.action-feedback button:hover{background:#333959;color:#fff}
