@@ -365,3 +365,25 @@ The sidebar filters now switch between distinct download views. **All downloads*
 Reference review: [maxuanquang/idm](https://github.com/maxuanquang/idm) is a Go-based HTTP-server-oriented download manager, useful as a conceptual example of download tasks and resume management but not a directly compatible Tauri UI component. [animatlittlechild8/Internet-Download-Manager-Engine](https://github.com/animatlittlechild8/Internet-Download-Manager-Engine) describes a Windows C++20 accelerator and browser integration architecture; its claims and linked external builds were not validated, and no third-party code or executable was imported. We retain our Ubuntu-first Rust/aria2 architecture and evaluate ideas separately.
 
 This navigation patch needs a fresh `bash scripts/ubuntu-qa.sh` and Ubuntu desktop check before marking it verified. Confirm that each sidebar category displays the matching title/count, and that the existing completed test download appears only under **All downloads** and **Completed**.
+
+## Compact dashboard and download sorting
+
+The four dashboard counters now remain in **one compact row** at supported Ubuntu desktop window widths, including widths that previously triggered the two-column rule. Their icons, padding and type scale were reduced. The transfer list also has lightweight in-memory sorting by Recent (original order), Name, File size, and Progress, without extra backend calls or dependencies.
+
+## Single-command Ubuntu developer testing and installation
+
+After pulling the version containing this helper once, close the installed Download Manager window, then use:
+
+```bash
+bash ~/download-manager/scripts/update-ubuntu.sh
+```
+
+For a machine that has **not yet pulled the helper**, run this **single shell line** for the first use:
+
+```bash
+git -C ~/download-manager pull --ff-only origin main && bash ~/download-manager/scripts/update-ubuntu.sh
+```
+
+The script checks that the application is closed, pulls `main` with fast-forward-only semantics, runs all the existing Ubuntu QA checks, builds and verifies exactly one `.deb`, reinstalls it via `sudo apt install --reinstall`, and launches the application. Installation may request the local sudo password. Failures print the last 40 lines of that stage and the private temporary log location; no full command-line arguments from aria2 processes are printed. This helper does not automatically close running apps or terminate unrelated aria2 instances. A script syntax check is included in `scripts/ubuntu-qa.sh`.
+
+Release testing still requires checking the new layout, filter navigation and sorting on a real Ubuntu desktop. The helper's full end-to-end workflow has not yet been confirmed on a user's machine.
