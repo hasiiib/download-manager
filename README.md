@@ -403,3 +403,11 @@ The top breadcrumb/status strip (previously `WORKSPACE / ALL DOWNLOADS` with an 
 Completed download rows now include **Open containing folder**, which invokes a new Rust command. On Ubuntu the command checks that the download is marked complete and the file exists, then opens its parent directory with `xdg-open` (no shell interpolation). It never auto-opens downloaded executables or arbitrary unverified URLs. The Rust unit test covers incomplete status, present files, and missing files. Other operating systems currently return an explicit unsupported-platform error.
 
 Close the running app and use `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, run QA, build/verify the installer, reinstall and launch in one command. Verify that the strip is gone, the Completed view shows the new folder icon, and clicking it opens the Ubuntu file manager. The updated backend and full installer are **not yet verified** on the Ubuntu testing machine.
+
+## Live-state download controls (November 2026)
+
+Pause, Resume and Cancel now check each transfer's current aria2 `tellStatus` value before issuing the action. Pausing an already-paused transfer, resuming an already-running transfer, or trying to control a finished/error transfer returns a specific error rather than blindly sending RPC commands. Successful actions immediately update the in-memory status, clear stale transfer speed, and persist history; aria2 session checkpoint failures are logged without falsely reporting that the already-applied control command failed. A Rust unit test covers permitted and rejected transitions.
+
+**Move to top/bottom** now verifies that the transfer is actually `waiting` in aria2. Successful queue actions are reported as changes to aria2 queue position; a separate future change is needed to display aria2's full queue order instead of the current history ordering. Transfer-control feedback and errors now appear beside the download rows, instead of only in the new-download form at the top of the page.
+
+These changes do not introduce new background polling or additional dependencies. Close the installed app and use `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, QA-test, build, verify and reinstall in one command. Real pause/resume, queue and restart behavior still need to be tested on Ubuntu with a slow, resumable download.
