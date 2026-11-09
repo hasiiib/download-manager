@@ -9,7 +9,7 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 
-if pgrep -x download-manager >/dev/null 2>&1; then
+if ps -C download-manager -o pid= 2>/dev/null | grep -q "[0-9]"; then
   echo "[ERROR] Close Download Manager before rebuilding and reinstalling it." >&2
   echo "After closing the window, run this same command again." >&2
   exit 1
