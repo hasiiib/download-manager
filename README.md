@@ -387,3 +387,11 @@ git -C ~/download-manager pull --ff-only origin main && bash ~/download-manager/
 The script checks that the application is closed, pulls `main` with fast-forward-only semantics, runs all the existing Ubuntu QA checks, builds and verifies exactly one `.deb`, reinstalls it via `sudo apt install --reinstall`, and launches the application. Installation may request the local sudo password. Failures print the last 40 lines of that stage and the private temporary log location; no full command-line arguments from aria2 processes are printed. This helper does not automatically close running apps or terminate unrelated aria2 instances. A script syntax check is included in `scripts/ubuntu-qa.sh`.
 
 Release testing still requires checking the new layout, filter navigation and sorting on a real Ubuntu desktop. The helper's full end-to-end workflow has not yet been confirmed on a user's machine.
+
+## Auto-collapsing navigation and dark sorting control
+
+The Ubuntu desktop screenshot showed a bright native GTK select for sorting that clashed with the dark interface. Sort now uses a lightweight HTML details menu styled within the app rather than the native select popup. Recent, Name, File size and Progress remain available without adding a UI library.
+
+The sidebar now starts expanded. Clicking outside it, in the main content area, collapses it into a narrow icon-only rail. Clicking the Download Manager logo/button expands it again. Every category icon in collapsed mode has a numeric badge above its icon, including zero counts. **Failed** turns red when there are failed, interrupted or removed transfers; this indicates the app's recorded status, not just live aria2 errors. Icons retain accessible names and hover titles. Settings remains available while collapsed.
+
+No new timers or background listeners were introduced for the sidebar; the toggle is local React state. This is a UI-only change, so it does not promise lower WebKit process RSS. Use the existing single-command `bash ~/download-manager/scripts/update-ubuntu.sh` (close the app before running) to pull, QA-test, build, verify, reinstall and launch the latest version. Verify the collapsed icon badges and sort menu on Ubuntu before declaring them tested.
