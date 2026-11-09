@@ -64,3 +64,14 @@
 /* Separate category pages must expose filtered rows immediately, not below dashboard stats. */
 .view-count{display:inline-flex;vertical-align:middle;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 7px;border-radius:20px;background:#2a264b;color:#c3adff;font-size:11px;margin-left:8px}
 .notice-success{color:#6fe0b3;font-size:12px}
+
+/* Four compact dashboard counters stay on one line at Ubuntu desktop widths.
+   Override the older max-width:1200px two-column rule above. */
+.stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-bottom:17px}
+.stat{min-width:0;min-height:69px;padding:11px 10px;gap:9px;border-radius:11px}
+.stat-icon{width:33px;height:33px;flex:0 0 33px;border-radius:9px}
+.stat-icon svg{width:17px;height:17px}
+.stat>div:last-child{min-width:0}
+.stat small{font-size:10px;line-height:1.25;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat strong,.stat-speed strong{font-size:19px;line-height:1.1}
+@media(max-width:1000px){.stats{gap:7px}.stat{padding:9px 7px;gap:6px}.stat-icon{width:27px;height:27px;flex-basis:27px}.stat-icon svg{width:15px;height:15px}.stat small{font-size:9px}.stat strong,.stat-speed strong{font-size:17px}}
