@@ -27,6 +27,7 @@ run_step() {
 }
 
 # Stop at the first failure: later failures usually hide the root cause.
+run_step updater-syntax bash -n scripts/update-ubuntu.sh || exit 1
 run_step prerequisites bash scripts/doctor.sh || exit 1
 run_step icon python3 scripts/generate_icon.py || exit 1
 run_step frontend-dependencies npm install --no-audit --no-fund || exit 1
