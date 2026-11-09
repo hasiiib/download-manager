@@ -32,6 +32,7 @@ type Settings = {
   lowMemoryMode: boolean;
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
+type SortOrder = "default" | "name" | "size" | "progress";
 const viewTitles: Record<Filter, string> = {
   all: "All downloads",
   active: "In progress",
@@ -78,6 +79,7 @@ export default function App() {
   const [batchText, setBatchText] = useState("");
   const [batchError, setBatchError] = useState("");
   const [query, setQuery] = useState("");
+  const [sortOrder, setSortOrder] = useState<SortOrder>("default");
   const [filter, setFilter] = useState<Filter>("all");
   const [settings, setSettings] = useState<Settings>(defaults);
   const [draft, setDraft] = useState<Settings>(defaults);
@@ -250,7 +252,19 @@ export default function App() {
     finally { setWorking(false); }
   };
 
-  const shown = useMemo(() => items.filter(d => filtered(d, filter) && (d.name.toLowerCase().includes(query.toLowerCase()) || d.source.toLowerCase().includes(query.toLowerCase()))), [items, filter, query]);
+  const shown = useMemo(() => {
+    const needle = query.toLowerCase();
+    const visible = items.filter(d => filtered(d, filter) &&
+      (d.name.toLowerCase().includes(needle) || d.source.toLowerCase().includes(needle)));
+    if (sortOrder === "name") visible.sort((a, b) => a.name.localeCompare(b.name));
+    if (sortOrder === "size") visible.sort((a, b) => b.totalLength - a.totalLength);
+    if (sortOrder === "progress") visible.sort((a, b) => {
+      const progress = (item: DownloadItem) => item.status === "complete" ? 1 :
+        item.totalLength > 0 ? item.completedLength / item.totalLength : 0;
+      return progress(b) - progress(a);
+    });
+    return visible;
+  }, [items, filter, query, sortOrder]);
   const active = items.filter(d => d.status === "active").length;
   const done = items.filter(d => d.status === "complete").length;
   const speed = items.reduce((sum, item) => sum + (item.status === "active" ? item.downloadSpeed : 0), 0);
@@ -284,7 +298,7 @@ export default function App() {
         {!engineOnline && <p className="error" role="alert">{engineHealth}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
       </section>}
-      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><label className="sort-label">Sort <select aria-label="Sort downloads" value={sortOrder} onChange={e => setSortOrder(e.target.value as SortOrder)}><option value="default">Recent</option><option value="name">Name</option><option value="size">File size</option><option value="progress">Progress</option></select></label><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
