@@ -119,3 +119,12 @@
 .sort-options{position:absolute;right:0;top:calc(100% + 5px);z-index:12;min-width:145px;padding:5px;background:#171e33;border:1px solid #3c4664;border-radius:10px;box-shadow:0 12px 28px #0009}
 .sort-options button{display:block;width:100%;padding:10px 11px;text-align:left;color:#dbe4fa;background:transparent;border:0;border-radius:6px;cursor:pointer;font-size:11px}
 .sort-options button:hover,.sort-options button[aria-pressed="true"]{background:#30294f;color:#cbb9ff}
+
+/* Compact workspace heading: prioritize room for transfers over decorative whitespace. */
+.main>header{height:54px;min-height:54px}
+.heading{padding:16px 0 15px}
+.heading h1{font-size:34px;line-height:1.14;letter-spacing:-1.4px;margin:7px 0 5px}
+.heading p{font-size:12px;line-height:1.5}
+.eyebrow{font-size:9px;letter-spacing:1.2px}
+.crumb{font-size:10px}
+@media(max-width:1000px){.main>header{height:50px;min-height:50px}.heading{padding:13px 0 13px}.heading h1{font-size:30px}}
