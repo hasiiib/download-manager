@@ -81,3 +81,41 @@
 .sort-label select{appearance:auto;border:1px solid #323b57;border-radius:8px;background:#131b30;color:#e4e9fa;padding:10px 8px;max-width:110px;font-size:11px;cursor:pointer}
 .sort-label select:focus{outline:1px solid #9b83f5}
 @media(max-width:950px){.list-head{align-items:flex-start;flex-wrap:wrap}.list-tools{margin-left:auto}}
+
+/* Collapsible, keyboard-accessible navigation; no animation timers or extra polling. */
+.sidebar{transition:width .16s ease,padding .16s ease}
+.sidebar-collapsed{width:72px;min-width:72px;padding:26px 9px;align-items:stretch}
+.sidebar .brand-toggle{width:calc(100% - 16px);margin:0 8px 58px;padding:0;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.sidebar .brand-toggle:hover .brand-icon{filter:brightness(1.18)}
+.sidebar .brand-toggle:focus-visible,.sidebar .nav:focus-visible{outline:2px solid #aa91ff;outline-offset:3px}
+.brand-copy{min-width:0}
+.brand-copy strong{display:block;font:700 16px "Space Grotesk",sans-serif;letter-spacing:-.6px}
+.brand-copy strong span{color:#a18aff}
+.brand-copy small{display:block;font-size:9px;letter-spacing:2px;color:#65718c;white-space:nowrap}
+.sidebar-collapsed .brand-toggle{margin:0 auto 45px;width:44px;justify-content:center}
+.sidebar-collapsed .brand-icon{flex:none}
+.sidebar-collapsed .nav{height:52px;width:52px;margin:0 auto 7px;padding:0;justify-content:center;overflow:visible}
+.sidebar-collapsed .nav-icon{height:28px;width:28px}
+.nav-icon{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.nav-icon-count{position:absolute;right:-13px;top:-11px;min-width:17px;height:17px;display:flex;align-items:center;justify-content:center;border:1px solid #0b0e1c;background:#302a55;color:#ede7ff;padding:0 3px;border-radius:12px;font-size:10px;font-weight:800;line-height:1;pointer-events:none}
+.sidebar-collapsed .nav.active{box-shadow:inset 3px 0 #9d81ff}
+.sidebar .nav-failed{color:#ff758d}
+.sidebar .nav-failed .nav-icon-count{background:#9b2a47;color:#fff}
+.sidebar .nav-failed.active{background:#3b1b31;color:#ff9baf;box-shadow:inset 3px 0 #f9738e}
+.sidebar-collapsed .nav-settings{margin-top:24px}
+.sidebar-collapsed .sidebar-bottom{display:none}
+.sidebar:not(.sidebar-collapsed) .nav-icon{margin-right:0}
+.sidebar .nav-name{min-width:0;white-space:nowrap}
+.sidebar .nav b{white-space:nowrap}
+@media(max-width:1000px){.sidebar-collapsed{width:66px;min-width:66px;padding:22px 6px}.sidebar-collapsed .nav{width:51px}}
+
+/* Dark native-independent sorting menu to avoid bright GTK select controls. */
+.sort-menu{position:relative;font-size:11px;color:#dce4fa}
+.sort-menu>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:130px;padding:11px 12px;border:1px solid #313c5a;border-radius:9px;background:#131b30;color:#e3eafc;cursor:pointer;user-select:none}
+.sort-menu>summary::-webkit-details-marker{display:none}
+.sort-menu>summary:hover,.sort-menu[open]>summary{border-color:#9379ec;background:#202642}
+.sort-menu>summary:focus-visible{outline:2px solid #a38aff;outline-offset:2px}
+.sort-menu>summary span{color:#b4a1ef}
+.sort-options{position:absolute;right:0;top:calc(100% + 5px);z-index:12;min-width:145px;padding:5px;background:#171e33;border:1px solid #3c4664;border-radius:10px;box-shadow:0 12px 28px #0009}
+.sort-options button{display:block;width:100%;padding:10px 11px;text-align:left;color:#dbe4fa;background:transparent;border:0;border-radius:6px;cursor:pointer;font-size:11px}
+.sort-options button:hover,.sort-options button[aria-pressed="true"]{background:#30294f;color:#cbb9ff}
