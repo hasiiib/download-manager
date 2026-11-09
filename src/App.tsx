@@ -286,7 +286,7 @@ export default function App() {
       ] as const).map(({ key, label, icon, count }) =>
         <button type="button" key={key} title={label + ": " + count} aria-label={label + ": " + count}
           aria-current={filter === key ? "page" : undefined}
-          className={["nav", filter === key ? "active" : "", key === "error" ? "nav-failed" : ""].filter(Boolean).join(" ")}
+          className={["nav", filter === key ? "active" : "", key === "error" && count > 0 ? "nav-failed" : ""].filter(Boolean).join(" ")}
           onClick={() => selectView(key)}>
           <span className="nav-icon">{icon}{!sidebarExpanded && <span className="nav-icon-count">{count}</span>}</span>
           {sidebarExpanded && <><span className="nav-name">{label}</span><b>{count}</b></>}
