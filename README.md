@@ -357,3 +357,11 @@ ps -C aria2c -o pid,ppid,rss,etime,comm
 ```
 
 Close all Download Manager windows normally and rerun both commands. If aria2c processes remain, report their PID/PPID and elapsed times before terminating anything. Do **not** run `pkill aria2c` indiscriminately, since other apps may own some aria2 processes. The app process RSS includes WebKit overhead, which UI polling changes cannot eliminate; meaningful memory optimization requires measuring idle and active cases separately.
+
+## Filter navigation fixed after Ubuntu feedback (November 2026)
+
+The sidebar filters now switch between distinct download views. **All downloads** contains the dashboard totals, add-download form and all transfer rows. **In progress**, **Completed**, **Torrents** and **Failed** display their own heading, description, result count and filtered rows immediately, without making users scroll past dashboard totals. Sidebar selection clears search; empty categories explicitly describe the current view. The totals previously remained visible even after choosing Completed, creating the misleading impression that the click did nothing. Successful download notifications no longer use error styling.
+
+Reference review: [maxuanquang/idm](https://github.com/maxuanquang/idm) is a Go-based HTTP-server-oriented download manager, useful as a conceptual example of download tasks and resume management but not a directly compatible Tauri UI component. [animatlittlechild8/Internet-Download-Manager-Engine](https://github.com/animatlittlechild8/Internet-Download-Manager-Engine) describes a Windows C++20 accelerator and browser integration architecture; its claims and linked external builds were not validated, and no third-party code or executable was imported. We retain our Ubuntu-first Rust/aria2 architecture and evaluate ideas separately.
+
+This navigation patch needs a fresh `bash scripts/ubuntu-qa.sh` and Ubuntu desktop check before marking it verified. Confirm that each sidebar category displays the matching title/count, and that the existing completed test download appears only under **All downloads** and **Completed**.
