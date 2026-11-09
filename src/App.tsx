@@ -93,6 +93,7 @@ export default function App() {
   const [torrentError, setTorrentError] = useState("");
   const [torrentBusy, setTorrentBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [actionFeedback, setActionFeedback] = useState("");
   const [working, setWorking] = useState(false);
   const [refreshError, setRefreshError] = useState("");
   const [engineHealth, setEngineHealth] = useState("Checking engine connection...");
@@ -221,35 +222,36 @@ export default function App() {
   };
 
   const moveQueue = async (gid: string, direction: "top" | "bottom") => {
-    setMessage("");
-    try { await invoke("move_queued_download", { gid, direction }); await refresh(); }
-    catch (err) { setMessage(String(err)); }
+    setActionFeedback("");
+    try { await invoke("move_queued_download", { gid, direction }); await refresh(); setActionFeedback("Queue order updated."); }
+    catch (err) { setActionFeedback(String(err)); }
   };
 
   const retry = async (item: DownloadItem) => {
-    setMessage("");
-    try { await invoke("retry_download", { gid: item.gid }); await refresh(); }
-    catch (err) { setMessage(String(err)); }
+    setActionFeedback("");
+    try { await invoke("retry_download", { gid: item.gid }); await refresh(); setActionFeedback("Transfer retried."); }
+    catch (err) { setActionFeedback(String(err)); }
   };
 
   const control = async (gid: string, action: "pause" | "resume" | "cancel") => {
-    setMessage("");
-    try { await invoke("control_download", { gid, action }); await refresh(); }
-    catch (err) { setMessage(String(err)); }
+    setActionFeedback("");
+    try { await invoke("control_download", { gid, action }); await refresh(); setActionFeedback("Transfer " + (action === "cancel" ? "cancelled" : action === "resume" ? "resumed" : "paused") + "."); }
+    catch (err) { setActionFeedback(String(err)); }
   };
 
   const openFolder = async (gid: string) => {
-    setMessage("");
+    setActionFeedback("");
     try {
       await invoke("open_download_folder", { gid });
     } catch (error) {
-      setMessage(String(error));
+      setActionFeedback(String(error));
     }
   };
 
   const forget = async (gid: string) => {
-    try { await invoke("forget_download", { gid }); await refresh(); }
-    catch (err) { setMessage(String(err)); }
+    setActionFeedback("");
+    try { await invoke("forget_download", { gid }); await refresh(); setActionFeedback("Download removed from history."); }
+    catch (err) { setActionFeedback(String(err)); }
   };
 
   const save = async () => {
@@ -327,6 +329,7 @@ export default function App() {
       {!engineOnline && <p className="engine-notice" role="alert">{engineHealth}</p>}
       {message && filter !== "all" && <p className="engine-notice" role="status">{message}</p>}
       {refreshError && filter !== "all" && <p className="engine-notice" role="alert">Engine: {refreshError}</p>}
+      {actionFeedback && <div className="action-feedback" role="status"><span>{actionFeedback}</span><button type="button" aria-label="Dismiss notification" onClick={() => setActionFeedback("")}><X size={14}/></button></div>}
       <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
