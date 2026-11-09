@@ -32,6 +32,20 @@ type Settings = {
   lowMemoryMode: boolean;
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
+const viewTitles: Record<Filter, string> = {
+  all: "All downloads",
+  active: "In progress",
+  complete: "Completed",
+  error: "Failed",
+  torrent: "Torrents",
+};
+const viewDescriptions: Record<Filter, string> = {
+  all: "Manage direct links, torrents and magnet downloads in one place.",
+  active: "Active, queued and paused transfers.",
+  complete: "Successfully finished downloads.",
+  error: "Failed, removed or interrupted transfers.",
+  torrent: "Your magnet and BitTorrent downloads.",
+};
 type SettingsTab = "general" | "connection" | "save" | "downloads" | "integration" | "privacy";
 const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
@@ -82,6 +96,10 @@ export default function App() {
   const [engineOnline, setEngineOnline] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const refreshing = useRef(false);
+  const selectView = (view: Filter) => {
+    setFilter(view);
+    setQuery("");
+  };
 
   const refresh = useCallback(async () => {
     // Ignore overlapping polls instead of allowing slower responses to overwrite fresh data.
@@ -241,33 +259,33 @@ export default function App() {
     <aside className="sidebar">
       <div className="brand"><div className="brand-icon"><ArrowDownToLine size={22} /></div><div><strong>Download<span>Manager</span></strong><small>YOUR DOWNLOAD HUB</small></div></div>
       <div className="nav-label">WORKSPACE</div>
-      <button className={filter === "all" ? "nav active" : "nav"} onClick={() => setFilter("all")}><HardDrive size={18} /> All downloads <b>{items.length}</b></button>
-      <button className={filter === "active" ? "nav active" : "nav"} onClick={() => setFilter("active")}><Download size={18} /> In progress <b>{items.filter(d => activeState(d.status)).length}</b></button>
-      <button className={filter === "complete" ? "nav active" : "nav"} onClick={() => setFilter("complete")}><CheckCircle2 size={18} /> Completed <b>{done}</b></button>
-      <button className={filter === "torrent" ? "nav active" : "nav"} onClick={() => setFilter("torrent")}><Magnet size={18} /> Torrents <b>{items.filter(d => isTorrent(d)).length}</b></button>
-      <button className={filter === "error" ? "nav active" : "nav"} onClick={() => setFilter("error")}><XCircle size={18} /> Failed</button>
+      <button className={filter === "all" ? "nav active" : "nav"} aria-current={filter === "all" ? "page" : undefined} onClick={() => selectView("all")}><HardDrive size={18} /> All downloads <b>{items.length}</b></button>
+      <button className={filter === "active" ? "nav active" : "nav"} aria-current={filter === "active" ? "page" : undefined} onClick={() => selectView("active")}><Download size={18} /> In progress <b>{items.filter(d => activeState(d.status)).length}</b></button>
+      <button className={filter === "complete" ? "nav active" : "nav"} aria-current={filter === "complete" ? "page" : undefined} onClick={() => selectView("complete")}><CheckCircle2 size={18} /> Completed <b>{done}</b></button>
+      <button className={filter === "torrent" ? "nav active" : "nav"} aria-current={filter === "torrent" ? "page" : undefined} onClick={() => selectView("torrent")}><Magnet size={18} /> Torrents <b>{items.filter(d => isTorrent(d)).length}</b></button>
+      <button className={filter === "error" ? "nav active" : "nav"} aria-current={filter === "error" ? "page" : undefined} onClick={() => selectView("error")}><XCircle size={18} /> Failed <b>{items.filter(d => filtered(d,"error")).length}</b></button>
       <div className="nav-label nav-label-secondary">PREFERENCES</div>
       <button className="nav" onClick={() => { setDraft(settings); setSettingsError(""); setSettingsOpen(true); }}><Settings2 size={18} /> Settings</button>
       <div className="sidebar-bottom"><div className="side-note"><ShieldCheck size={20}/><div><strong>Private RPC engine</strong><p>aria2 runs on localhost with a private token.</p></div></div><div className="version">DEVELOPMENT PREVIEW · v0.2</div></div>
     </aside>
     <main className="main">
-      <header><div className="crumb">WORKSPACE <span>/</span> DOWNLOADS</div><div className="badge" title={engineHealth}><span className="dot" style={{ background: engineOnline ? "#4dda9b" : "#ff6b7a" }} /> {engineOnline ? "aria2 Connected" : "aria2 Disconnected"}</div></header>
-      <section className="heading"><div><div className="eyebrow"><Zap size={14} /> DOWNLOADS, UNDER CONTROL</div><h1>Downloads<span>.</span></h1><p>Manage direct links, torrents and magnet downloads in one place.</p></div></section>
-      <section className="stats">
+      <header><div className="crumb">WORKSPACE <span>/</span> {viewTitles[filter].toUpperCase()}</div><div className="badge" title={engineHealth}><span className="dot" style={{ background: engineOnline ? "#4dda9b" : "#ff6b7a" }} /> {engineOnline ? "aria2 Connected" : "aria2 Disconnected"}</div></header>
+      <section className="heading"><div><div className="eyebrow"><Zap size={14} /> DOWNLOADS, UNDER CONTROL</div><h1>{viewTitles[filter]}<span>.</span></h1><p>{viewDescriptions[filter]}</p></div></section>
+      {filter === "all" && <section className="stats">
         <div className="stat"><div className="stat-icon violet"><HardDrive size={21}/></div><div><small>All downloads</small><strong>{items.length}</strong></div></div>
         <div className="stat"><div className="stat-icon blue"><Download size={21}/></div><div><small>Downloading</small><strong>{active}</strong></div></div>
         <div className="stat"><div className="stat-icon green"><CheckCircle2 size={21}/></div><div><small>Completed</small><strong>{done}</strong></div></div>
         <div className="stat stat-speed"><div className="stat-icon violet"><Zap size={21}/></div><div><small>Total download speed</small><strong>{formatSize(speed)}/s</strong></div></div>
-      </section>
-      <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · MAGNET · TORRENT · METALINK</span></div>
+      </section>}
+      {filter === "all" && <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · MAGNET · TORRENT · METALINK</span></div>
         <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
         {message && <p className="error" role="alert">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
         {!engineOnline && <p className="error" role="alert">{engineHealth}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
-      </section>
-      <section className="list"><div className="list-head"><div><h2>Download activity</h2><p>Pause, resume and monitor active transfers</p></div><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
-        {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{filter === "all" && !query ? "No downloads here yet" : "No downloads match this view"}</h3><p>{filter === "all" && !query ? "Add a URL, magnet link or torrent to get started." : "Downloads may be hidden by the selected filter or search."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
+      </section>}
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div>
+        {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
             <div className="file-info"><strong title={item.source}>{item.name}</strong><small title={item.error || item.path || item.source}>{item.error || item.path || item.source}</small><div className="progress"><span style={{ width: item.status === "complete" ? "100%" : item.totalLength ? Math.min(100, item.completedLength / item.totalLength * 100) + "%" : "0%" }} /></div></div>
