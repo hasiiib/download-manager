@@ -60,3 +60,7 @@
 .planned-row span{font-size:10px;color:#a991ff;white-space:nowrap}
 .clear-filter{background:#7260dc;color:white;border:0;border-radius:9px;padding:11px 18px;font-size:12px;font-weight:700;margin-top:12px}
 @media(max-width:720px){.settings-layout{grid-template-columns:1fr;overflow-y:auto}.settings-tabs{flex-direction:row;flex-wrap:wrap;border-right:0;border-bottom:1px solid #313b58;padding:0 0 12px}.settings-tabs button{padding:9px}.settings-content{overflow:visible}}
+
+/* Separate category pages must expose filtered rows immediately, not below dashboard stats. */
+.view-count{display:inline-flex;vertical-align:middle;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 7px;border-radius:20px;background:#2a264b;color:#c3adff;font-size:11px;margin-left:8px}
+.notice-success{color:#6fe0b3;font-size:12px}
