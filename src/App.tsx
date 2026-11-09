@@ -81,6 +81,7 @@ export default function App() {
   const [query, setQuery] = useState("");
   const [sortOrder, setSortOrder] = useState<SortOrder>("default");
   const [filter, setFilter] = useState<Filter>("all");
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [settings, setSettings] = useState<Settings>(defaults);
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -270,19 +271,36 @@ export default function App() {
   const speed = items.reduce((sum, item) => sum + (item.status === "active" ? item.downloadSpeed : 0), 0);
 
   return <div className="shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-icon"><ArrowDownToLine size={22} /></div><div><strong>Download<span>Manager</span></strong><small>YOUR DOWNLOAD HUB</small></div></div>
-      <div className="nav-label">WORKSPACE</div>
-      <button className={filter === "all" ? "nav active" : "nav"} aria-current={filter === "all" ? "page" : undefined} onClick={() => selectView("all")}><HardDrive size={18} /> All downloads <b>{items.length}</b></button>
-      <button className={filter === "active" ? "nav active" : "nav"} aria-current={filter === "active" ? "page" : undefined} onClick={() => selectView("active")}><Download size={18} /> In progress <b>{items.filter(d => activeState(d.status)).length}</b></button>
-      <button className={filter === "complete" ? "nav active" : "nav"} aria-current={filter === "complete" ? "page" : undefined} onClick={() => selectView("complete")}><CheckCircle2 size={18} /> Completed <b>{done}</b></button>
-      <button className={filter === "torrent" ? "nav active" : "nav"} aria-current={filter === "torrent" ? "page" : undefined} onClick={() => selectView("torrent")}><Magnet size={18} /> Torrents <b>{items.filter(d => isTorrent(d)).length}</b></button>
-      <button className={filter === "error" ? "nav active" : "nav"} aria-current={filter === "error" ? "page" : undefined} onClick={() => selectView("error")}><XCircle size={18} /> Failed <b>{items.filter(d => filtered(d,"error")).length}</b></button>
-      <div className="nav-label nav-label-secondary">PREFERENCES</div>
-      <button className="nav" onClick={() => { setDraft(settings); setSettingsError(""); setSettingsOpen(true); }}><Settings2 size={18} /> Settings</button>
-      <div className="sidebar-bottom"><div className="side-note"><ShieldCheck size={20}/><div><strong>Private RPC engine</strong><p>aria2 runs on localhost with a private token.</p></div></div><div className="version">DEVELOPMENT PREVIEW · v0.2</div></div>
+    <aside className={sidebarExpanded ? "sidebar" : "sidebar sidebar-collapsed"} aria-label="Download navigation">
+      <button type="button" className="brand brand-toggle" aria-label={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarExpanded} onClick={() => setSidebarExpanded(expanded => !expanded)} title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}>
+        <span className="brand-icon"><ArrowDownToLine size={22} /></span>
+        {sidebarExpanded && <span className="brand-copy"><strong>Download<span>Manager</span></strong><small>YOUR DOWNLOAD HUB</small></span>}
+      </button>
+      {sidebarExpanded && <div className="nav-label">WORKSPACE</div>}
+      {([
+        { key: "all", label: "All downloads", icon: <HardDrive size={18} />, count: items.length },
+        { key: "active", label: "In progress", icon: <Download size={18} />, count: items.filter(d => activeState(d.status)).length },
+        { key: "complete", label: "Completed", icon: <CheckCircle2 size={18} />, count: items.filter(d => d.status === "complete").length },
+        { key: "torrent", label: "Torrents", icon: <Magnet size={18} />, count: items.filter(d => isTorrent(d)).length },
+        { key: "error", label: "Failed", icon: <XCircle size={18} />, count: items.filter(d => filtered(d, "error")).length },
+      ] as const).map(({ key, label, icon, count }) =>
+        <button type="button" key={key} title={label + ": " + count} aria-label={label + ": " + count}
+          aria-current={filter === key ? "page" : undefined}
+          className={["nav", filter === key ? "active" : "", key === "error" ? "nav-failed" : ""].filter(Boolean).join(" ")}
+          onClick={() => selectView(key)}>
+          <span className="nav-icon">{icon}{!sidebarExpanded && <span className="nav-icon-count">{count}</span>}</span>
+          {sidebarExpanded && <><span className="nav-name">{label}</span><b>{count}</b></>}
+        </button>
+      )}
+      {sidebarExpanded && <div className="nav-label nav-label-secondary">PREFERENCES</div>}
+      <button type="button" className="nav nav-settings" title="Settings" aria-label="Settings"
+        onClick={() => { setDraft(settings); setSettingsError(""); setSettingsOpen(true); }}>
+        <span className="nav-icon"><Settings2 size={18} /></span>
+        {sidebarExpanded && <span className="nav-name">Settings</span>}
+      </button>
+      {sidebarExpanded && <div className="sidebar-bottom"><div className="side-note"><ShieldCheck size={20}/><div><strong>Private RPC engine</strong><p>aria2 runs on localhost with a private token.</p></div></div><div className="version">DEVELOPMENT PREVIEW · v0.2</div></div>}
     </aside>
-    <main className="main">
+    <main className="main" onPointerDown={() => { if (sidebarExpanded) setSidebarExpanded(false); }}>
       <header><div className="crumb">WORKSPACE <span>/</span> {viewTitles[filter].toUpperCase()}</div><div className="badge" title={engineHealth}><span className="dot" style={{ background: engineOnline ? "#4dda9b" : "#ff6b7a" }} /> {engineOnline ? "aria2 Connected" : "aria2 Disconnected"}</div></header>
       <section className="heading"><div><div className="eyebrow"><Zap size={14} /> DOWNLOADS, UNDER CONTROL</div><h1>{viewTitles[filter]}<span>.</span></h1><p>{viewDescriptions[filter]}</p></div></section>
       {filter === "all" && <section className="stats">
@@ -298,7 +316,7 @@ export default function App() {
         {!engineOnline && <p className="error" role="alert">{engineHealth}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
       </section>}
-      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><label className="sort-label">Sort <select aria-label="Sort downloads" value={sortOrder} onChange={e => setSortOrder(e.target.value as SortOrder)}><option value="default">Recent</option><option value="name">Name</option><option value="size">File size</option><option value="progress">Progress</option></select></label><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
