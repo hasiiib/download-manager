@@ -128,3 +128,7 @@
 .eyebrow{font-size:9px;letter-spacing:1.2px}
 .crumb{font-size:10px}
 @media(max-width:1000px){.main>header{height:50px;min-height:50px}.heading{padding:13px 0 13px}.heading h1{font-size:30px}}
+
+/* The former WORKSPACE breadcrumb and connection status header were removed. */
+.main>.heading:first-child{padding-top:17px}
+.engine-notice{margin:5px 0 14px;padding:10px 13px;border:1px solid #704053;border-radius:9px;background:#2b1929;color:#ffb4c0;font-size:12px;overflow-wrap:anywhere}
