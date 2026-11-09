@@ -395,3 +395,11 @@ The Ubuntu desktop screenshot showed a bright native GTK select for sorting that
 The sidebar now starts expanded. Clicking outside it, in the main content area, collapses it into a narrow icon-only rail. Clicking the Download Manager logo/button expands it again. Every category icon in collapsed mode has a numeric badge above its icon, including zero counts. **Failed** turns red when there are failed, interrupted or removed transfers; this indicates the app's recorded status, not just live aria2 errors. Icons retain accessible names and hover titles. Settings remains available while collapsed.
 
 No new timers or background listeners were introduced for the sidebar; the toggle is local React state. This is a UI-only change, so it does not promise lower WebKit process RSS. Use the existing single-command `bash ~/download-manager/scripts/update-ubuntu.sh` (close the app before running) to pull, QA-test, build, verify, reinstall and launch the latest version. Verify the collapsed icon badges and sort menu on Ubuntu before declaring them tested.
+
+## Cleaner desktop workspace and open-folder action
+
+The top breadcrumb/status strip (previously `WORKSPACE / ALL DOWNLOADS` with an aria2 Connected badge) has been removed entirely. The main view starts with its category heading, giving more vertical room to downloads. Backend health is still polled; errors are displayed as an inline warning rather than an always-visible badge.
+
+Completed download rows now include **Open containing folder**, which invokes a new Rust command. On Ubuntu the command checks that the download is marked complete and the file exists, then opens its parent directory with `xdg-open` (no shell interpolation). It never auto-opens downloaded executables or arbitrary unverified URLs. The Rust unit test covers incomplete status, present files, and missing files. Other operating systems currently return an explicit unsupported-platform error.
+
+Close the running app and use `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, run QA, build/verify the installer, reinstall and launch in one command. Verify that the strip is gone, the Completed view shows the new folder icon, and clicking it opens the Ubuntu file manager. The updated backend and full installer are **not yet verified** on the Ubuntu testing machine.
