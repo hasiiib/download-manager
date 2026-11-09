@@ -798,6 +798,48 @@ async fn save_settings(engine: State<'_, Engine>, settings: Settings) -> Result<
     save_json(&engine.data_dir.join("settings.json"), &settings)
 }
 
+fn completed_download_folder(item: &Download) -> Result<PathBuf, String> {
+    if item.status != "complete" {
+        return Err("The download must be complete before opening its folder".into());
+    }
+    if item.path.is_empty() {
+        return Err("No saved file path is available for this download".into());
+    }
+    let file = std::path::Path::new(&item.path);
+    if !file.is_file() {
+        return Err(format!("Downloaded file was not found: {}", file.display()));
+    }
+    let folder = file.parent().ok_or("Cannot determine downloaded file folder")?;
+    if !folder.is_dir() {
+        return Err("Downloaded file folder no longer exists".into());
+    }
+    Ok(folder.to_path_buf())
+}
+
+#[tauri::command]
+fn open_download_folder(engine: State<'_, Engine>, gid: String) -> Result<(), String> {
+    let folder = {
+        let entries = engine.downloads.lock().map_err(|error| error.to_string())?;
+        let item = entries.get(&gid).ok_or("Unknown download")?;
+        completed_download_folder(item)?
+    };
+    // Pass the folder as a separate process argument, never via a shell.
+    // Only invoke the local desktop file manager for a file verified on disk.
+    #[cfg(target_os = "linux")]
+    {
+        let mut child = Command::new("xdg-open")
+            .arg(&folder).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().map_err(|error| format!("Could not open file manager: {error}"))?;
+        std::thread::spawn(move || { let _ = child.wait(); });
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = folder;
+        Err("Open download folder is currently supported on Linux only".into())
+    }
+}
+
 #[tauri::command]
 fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String> {
     let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
@@ -881,6 +923,26 @@ mod tests {
         assert!(load_validated_settings(&path).is_err());
         fs::remove_dir_all(&folder).unwrap();
     }
+    #[test]
+    fn folder_open_requires_completed_existing_file() {
+        let folder = std::env::temp_dir().join(format!("dm-folder-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("fixture.txt");
+        fs::write(&file, b"fixture").unwrap();
+        let mut item = Download {
+            gid: "one".into(), source: "https://example.org/fixture.txt".into(),
+            is_torrent: false, name: "fixture.txt".into(), status: "active".into(),
+            completed_length: 7, total_length: 7, download_speed: 0,
+            upload_speed: 0, path: file.to_string_lossy().into_owned(), error: None,
+        };
+        assert!(completed_download_folder(&item).is_err());
+        item.status = "complete".into();
+        assert_eq!(completed_download_folder(&item).unwrap(), folder);
+        fs::remove_file(&file).unwrap();
+        assert!(completed_download_folder(&item).is_err());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
     #[test]
     fn validates_connection_limits() {
         let mut settings = Settings::defaults();
@@ -971,7 +1033,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine
+            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
