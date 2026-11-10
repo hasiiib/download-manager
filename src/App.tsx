@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Activity, ArrowDownToLine, ArrowUpToLine, ArrowDownToLine as QueueBottomIcon, CheckCircle2, Clock3, Download, FolderOpen, HardDrive,
-  Link2, Magnet, Pause, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal,
+  Link2, Magnet, Pause, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Video,
   Trash2, X, XCircle, Zap
 } from "lucide-react";
 
@@ -34,6 +34,9 @@ type Settings = {
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
+type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string };
+type MediaJob = { id: string; title: string; status: string; format: string; error: string | null };
+
 type Schedule = {
   state: "idle" | "armed" | "running" | "power_pending" | "completed" | "cancelled" | "error";
   startAtUnix: number;
@@ -97,6 +100,13 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaults);
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mediaOpen, setMediaOpen] = useState(false);
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [mediaFormat, setMediaFormat] = useState<"best" | "mp4" | "audio">("mp4");
+  const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
+  const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaError, setMediaError] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [scheduleStart, setScheduleStart] = useState("");
@@ -133,6 +143,7 @@ export default function App() {
       const list = await invoke<DownloadItem[]>("list_downloads");
       setItems(list);
       void invoke<Schedule>("get_schedule").then(setSchedule).catch(() => {});
+      void invoke<MediaJob[]>("list_media_jobs").then(setMediaJobs).catch(() => {});
       setRefreshError("");
     } catch (err) {
       setRefreshError(String(err));
@@ -306,6 +317,31 @@ export default function App() {
     }
   };
 
+  const inspectMedia = async () => {
+    setMediaBusy(true);
+    setMediaError("");
+    setMediaPreview(null);
+    try {
+      const info = await invoke<MediaPreview>("preview_media", { source: mediaUrl.trim() });
+      setMediaPreview(info);
+    } catch (error) { setMediaError(String(error)); }
+    finally { setMediaBusy(false); }
+  };
+
+  const startMedia = async () => {
+    setMediaBusy(true);
+    setMediaError("");
+    try {
+      const job = await invoke<MediaJob>("start_media_download", {
+        source: mediaUrl.trim(), format: mediaFormat,
+      });
+      setMediaJobs(jobs => [...jobs, job]);
+      setMediaPreview(null);
+      setMediaError("Media download started. Files will be saved in " + (settings.downloadDir || "your downloads folder") + ".");
+    } catch (error) { setMediaError(String(error)); }
+    finally { setMediaBusy(false); }
+  };
+
   const armSchedule = async () => {
     const start = new Date(scheduleStart).getTime();
     if (!Number.isFinite(start) || start <= Date.now()) {
@@ -420,7 +456,7 @@ export default function App() {
       {refreshError && filter !== "all" && <p className="engine-notice" role="alert">Engine: {refreshError}</p>}
       {schedule && ["armed","running","power_pending"].includes(schedule.state) && <div className="schedule-banner" role="status"><div><strong>{schedule.state === "armed" ? "Scheduled" : schedule.state === "running" ? "Schedule running" : "Power action pending"}</strong><span>{schedule.message}</span><small>{schedule.state === "armed" ? "Starts " + new Date(schedule.startAtUnix * 1000).toLocaleString() : schedule.state === "power_pending" ? "Power action at " + new Date(schedule.powerAtUnix * 1000).toLocaleTimeString() : "Monitoring " + schedule.gids.length + " transfers"}</small></div><button type="button" disabled={working} onClick={() => void cancelSchedule()}>Cancel schedule</button></div>}
       {actionFeedback && <div className="action-feedback" role="status"><span>{actionFeedback}</span><button type="button" aria-label="Dismiss notification" onClick={() => setActionFeedback("")}><X size={14}/></button></div>}
-      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setMediaError(""); setMediaOpen(true); }} title="Download video or audio using optional yt-dlp"><Video size={14}/> Video</button><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
@@ -442,6 +478,19 @@ export default function App() {
       </section>
       <footer><span><SlidersHorizontal size={15}/> Parallel connections, torrents and magnet links powered by aria2.</span><span>LINUX FIRST · CROSS-PLATFORM ROADMAP</span></footer>
     </main>
+    {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
+      <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
+        <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
+        <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg. No software is auto-installed.</p>
+        <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); }} placeholder="https://example.com/video"/></label>
+        <div className="media-actions"><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectMedia()}>{mediaBusy ? "Working..." : "Inspect media"}</button></div>
+        {mediaPreview && <div className="media-preview"><strong>{mediaPreview.title}</strong>{mediaPreview.uploader && <small>{mediaPreview.uploader}</small>}{mediaPreview.durationSeconds != null && <small>Duration: {Math.floor(mediaPreview.durationSeconds / 60)}m {Math.floor(mediaPreview.durationSeconds % 60)}s</small>}<small>yt-dlp {mediaPreview.ytDlpVersion}</small></div>}
+        <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value as "best" | "mp4" | "audio")}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="audio">MP3 audio</option></select></label>
+        {mediaJobs.length > 0 && <div className="media-job-list" aria-label="Media download jobs">{mediaJobs.map(job => <div key={job.id}><span title={job.title}>{job.title}</span><strong className={job.status === "error" ? "media-job-error" : ""}>{job.status}</strong>{job.error && <small>{job.error}</small>}</div>)}</div>}
+        {mediaError && <p className="settings-note" role="status">{mediaError}</p>}
+        <div className="modal-actions"><button type="button" onClick={() => setMediaOpen(false)}>Close</button><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void startMedia()}>{mediaBusy ? "Starting..." : "Start media download"}</button></div>
+      </section>
+    </div>}
     {scheduleOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setScheduleOpen(false); }}>
       <section className="modal schedule-modal" role="dialog" aria-modal="true" aria-label="Schedule downloads">
         <div className="modal-title"><div><Clock3 size={22}/><h2>Download scheduler</h2></div><button aria-label="Close scheduler" onClick={() => setScheduleOpen(false)}><X size={18}/></button></div>
