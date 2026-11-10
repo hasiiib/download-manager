@@ -19,9 +19,9 @@ This is the enduring backlog. **Planned is not implemented.** Existing features 
 - [ ] Proxy profiles, per-site authentication, headers/cookies and site exclusions
 
 ## Scheduling and power
-- [ ] Arm a download queue for a chosen local time and maximum simultaneous transfers
-- [ ] Monitor only scheduled transfers and stop/cancel safely
-- [ ] On verified completion, user-selectable None / Shutdown / Sleep with an explicit warning and cancellation grace period
+- [x] Arm a download queue for a chosen local time and maximum simultaneous transfers (code committed, Ubuntu verification pending)
+- [x] Track scheduled transfer completion and allow schedule cancellation (code committed, Ubuntu verification pending)
+- [x] On verified completion, user-selectable None / Shutdown / Sleep with an explicit warning and 60-second cancellation grace period (Linux code committed, not tested)
 - [ ] Repeat schedules, scheduled start/stop windows and bandwidth profiles
 - [ ] Start-at-login / tray support and recovery if application exits before scheduled time
 
