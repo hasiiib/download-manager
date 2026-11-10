@@ -1330,19 +1330,28 @@ fn parsed_feed(bytes: &[u8]) -> Result<FeedPreview, String> {
     let feed = feed_rs::parser::parse(bytes)
         .map_err(|error| format!("Invalid RSS/Atom/JSON feed: {error}"))?;
     let entries = feed.entries.iter().take(50).filter_map(|entry| {
-        let attachment = entry.links.iter().find(|link| link.rel.as_deref() == Some("enclosure"))
-            // feed-rs normalizes RSS 2 <enclosure> into Content.src,
-            // whereas Atom enclosure links may appear in Entry.links.
-            .or_else(|| entry.content.as_ref().and_then(|content| content.src.as_ref()));
-        let link = attachment.or_else(|| entry.links.iter().find(|link| link.rel.as_deref() == Some("alternate")))
-            .or_else(|| entry.links.first())?;
+        // feed-rs 3 stores RSS enclosures in MediaObject.content; Atom
+        // enclosures usually appear in Entry.links. Consider all supported
+        // representations before falling back to an article link.
+        let attachment = entry.links.iter()
+            .find(|link| link.rel.as_deref() == Some("enclosure"))
+            .map(|link| link.href.clone())
+            .or_else(|| entry.content.as_ref()
+                .and_then(|content| content.src.as_ref())
+                .map(|link| link.href.clone()))
+            .or_else(|| entry.media.iter()
+                .flat_map(|media| media.content.iter())
+                .find_map(|content| content.url.as_ref().map(ToString::to_string)));
+        let source = attachment.clone().or_else(|| entry.links.iter()
+            .find(|link| link.rel.as_deref() == Some("alternate"))
+            .or_else(|| entry.links.first()).map(|link| link.href.clone()))?;
         // Enclosure or article links must be explicit HTTP(S); never allow
         // file://, javascript: or other schemes from untrusted feed content.
-        media_http_url(&link.href).ok()?;
+        media_http_url(&source).ok()?;
         Some(FeedEntry {
             title: entry.title.as_ref().map(|title| title.content.as_str())
                 .unwrap_or("Untitled entry").chars().filter(|ch| !ch.is_control()).take(160).collect(),
-            source: link.href.clone(), enclosure: attachment.is_some(),
+            source, enclosure: attachment.is_some(),
         })
     }).collect();
     Ok(FeedPreview {
