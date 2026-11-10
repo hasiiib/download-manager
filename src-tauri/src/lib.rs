@@ -2,7 +2,7 @@ use base64::Engine as _;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, io::Write, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::Mutex, time::{Duration, Instant}};
+use std::{collections::BTreeMap, fs, io::Write, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::{Arc, Mutex}, time::{Duration, Instant}};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use tauri::State;
@@ -105,6 +105,49 @@ fn scheduled_terminal_state(status: &str) -> bool {
     matches!(status, "complete" | "error" | "removed")
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaJob {
+    id: String,
+    title: String,
+    status: String,
+    format: String,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaPreview {
+    title: String,
+    duration_seconds: Option<f64>,
+    uploader: String,
+    webpage_url: String,
+    yt_dlp_version: String,
+}
+
+fn media_http_url(source: &str) -> Result<(), String> {
+    if source.len() > 4096 || source.chars().any(|ch| ch.is_control()) {
+        return Err("Invalid media URL".into());
+    }
+    let parsed = url::Url::parse(source).map_err(|_| "Enter a valid media page URL")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("Only HTTP and HTTPS media page URLs are supported".into());
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Embedded URL credentials are not accepted".into());
+    }
+    Ok(())
+}
+
+fn media_format_args(format: &str) -> Result<Vec<&'static str>, String> {
+    match format {
+        "best" => Ok(vec!["-f", "bv*+ba/b", "--merge-output-format", "mkv"]),
+        "mp4" => Ok(vec!["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4"]),
+        "audio" => Ok(vec!["-x", "--audio-format", "mp3"]),
+        _ => Err("Select Best quality, MP4 or MP3 audio".into()),
+    }
+}
+
 struct Engine {
     client: reqwest::Client,
     endpoint: String,
@@ -113,6 +156,7 @@ struct Engine {
     downloads: Mutex<BTreeMap<String, Download>>,
     settings: Mutex<Settings>,
     schedule: Mutex<Schedule>,
+    media_jobs: Arc<Mutex<BTreeMap<String, MediaJob>>>,
     data_dir: PathBuf,
     last_history_save: Mutex<Instant>,
 }
@@ -333,7 +377,7 @@ impl Engine {
             client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
-            settings: Mutex::new(settings), schedule: Mutex::new(schedule), data_dir,
+            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
             last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
@@ -986,6 +1030,87 @@ fn save_schedule(engine: &Engine, schedule: &Schedule) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn list_media_jobs(engine: State<'_, Engine>) -> Result<Vec<MediaJob>, String> {
+    Ok(engine.media_jobs.lock().map_err(|error| error.to_string())?.values().cloned().collect())
+}
+
+#[tauri::command]
+async fn preview_media(source: String) -> Result<MediaPreview, String> {
+    media_http_url(&source)?;
+    // yt-dlp is an optional system dependency, never silently downloaded.
+    let result = tokio::task::spawn_blocking(move || {
+        let version = Command::new("yt-dlp").arg("--version")
+            .stdin(Stdio::null()).output()
+            .map_err(|_| "yt-dlp not found. Install it yourself before using Video downloader.".to_string())?;
+        if !version.status.success() { return Err("yt-dlp could not start".into()); }
+        let output = Command::new("yt-dlp")
+            .args(["--ignore-config", "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--no-call-home"])
+            .arg("--").arg(&source)
+            .stdin(Stdio::null()).output()
+            .map_err(|error| format!("Could not inspect media: {error}"))?;
+        if !output.status.success() {
+            return Err("Media inspection failed. Check the URL and whether the site is supported.".into());
+        }
+        if output.stdout.len() > 2_000_000 {
+            return Err("Media metadata is too large".into());
+        }
+        let info: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|_| "yt-dlp returned invalid media metadata")?;
+        Ok(MediaPreview {
+            title: info.get("title").and_then(Value::as_str).unwrap_or("Untitled media").chars().take(250).collect(),
+            duration_seconds: info.get("duration").and_then(Value::as_f64),
+            uploader: info.get("uploader").and_then(Value::as_str).unwrap_or("").chars().take(200).collect(),
+            webpage_url: info.get("webpage_url").and_then(Value::as_str).unwrap_or("").chars().take(4096).collect(),
+            yt_dlp_version: String::from_utf8_lossy(&version.stdout).trim().chars().take(64).collect(),
+        })
+    }).await.map_err(|error| error.to_string())?;
+    result
+}
+
+#[tauri::command]
+fn start_media_download(engine: State<'_, Engine>, source: String, format: String) -> Result<MediaJob, String> {
+    media_http_url(&source)?;
+    let args = media_format_args(&format)?;
+    let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
+    fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
+    let mut command = Command::new("yt-dlp");
+    command.args(["--ignore-config", "--no-playlist", "--no-progress", "--no-overwrites", "--restrict-filenames"]);
+    command.args(args);
+    command.arg("-P").arg(&output_folder);
+    command.arg("--").arg(&source);
+    let child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .spawn().map_err(|_| "yt-dlp is missing or could not launch. Install yt-dlp and FFmpeg to enable media downloads.".to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let job = MediaJob {
+        id: id.clone(), title: source, status: "downloading".into(),
+        format, error: None,
+    };
+    engine.media_jobs.lock().map_err(|error| error.to_string())?
+        .insert(id.clone(), job.clone());
+    let jobs = Arc::clone(&engine.media_jobs);
+    std::thread::spawn(move || {
+        let mut child = child;
+        let result = child.wait();
+        if let Ok(mut entries) = jobs.lock() {
+            if let Some(entry) = entries.get_mut(&id) {
+                match result {
+                    Ok(status) if status.success() => entry.status = "complete".into(),
+                    Ok(status) => {
+                        entry.status = "error".into();
+                        entry.error = Some(format!("yt-dlp exited with {status}. Check whether FFmpeg is installed or the source is supported."));
+                    }
+                    Err(error) => {
+                        entry.status = "error".into();
+                        entry.error = Some(format!("Cannot wait for yt-dlp: {error}"));
+                    }
+                }
+            }
+        }
+    });
+    Ok(job)
+}
+
+#[tauri::command]
 fn get_schedule(engine: State<'_, Engine>) -> Result<Schedule, String> {
     Ok(engine.schedule.lock().map_err(|error| error.to_string())?.clone())
 }
@@ -1470,6 +1595,21 @@ mod tests {
     }
 
     #[test]
+    fn media_helper_rejects_unsafe_sources_and_formats() {
+        assert!(media_http_url("https://example.org/watch?v=1").is_ok());
+        assert!(media_http_url("http://example.org/video").is_ok());
+        assert!(media_http_url("file:///etc/passwd").is_err());
+        assert!(media_http_url("ftp://example.org/video").is_err());
+        assert!(media_http_url("https://user:pass@example.org/watch").is_err());
+        assert!(media_http_url("--exec=bad").is_err());
+        assert!(media_http_url("https://example.org/\nmalicious").is_err());
+        assert!(media_format_args("best").is_ok());
+        assert!(media_format_args("mp4").is_ok());
+        assert!(media_format_args("audio").is_ok());
+        assert!(media_format_args("--exec").is_err());
+    }
+
+    #[test]
     fn scheduler_validates_time_limit_and_power_action() {
         let now = 1_700_000_000;
         assert!(validate_schedule_request(now + 120, 3, "none", now).is_ok());
@@ -1640,7 +1780,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
