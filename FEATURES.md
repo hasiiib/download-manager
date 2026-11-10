@@ -36,7 +36,7 @@ This ordering is for implementation priority only. No requested feature is dropp
 - [ ] Start-at-login / tray support and recovery if application exits before scheduled time
 
 ## Media, RSS and sources (high priority)
-- [ ] yt-dlp and ffmpeg integration: optional yt-dlp metadata inspection and single-item MP4/best-video/MP3 job launching implemented provisionally; playlist support, media pause/resume, detailed format choices and in-flight job reattachment still pending; live progress/speed/ETA, per-job cancel, installed-tool detection, retry and persistent history implemented provisionally (Ubuntu verification pending)
+- [ ] yt-dlp and ffmpeg integration: optional yt-dlp metadata inspection and single-item MP4/best-video/MP3 job launching implemented provisionally; playlist first-50-items opt-in and 720p/1080p presets now implemented provisionally, alongside live progress/speed/ETA, per-job cancel, installed-tool detection, retry and persistent history; media pause/resume, per-item playlist selection, detailed format lists and in-flight reattachment still pending (Ubuntu verification pending)
 - [ ] RSS subscriptions, filters and automatic episode/file downloads
 - [ ] HTTP link grabber and downloadable asset discovery
 - [ ] Cloud/service integrations and optional accounts where feasible
