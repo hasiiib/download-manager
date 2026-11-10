@@ -324,6 +324,7 @@ struct Engine {
     media_jobs: Arc<Mutex<BTreeMap<String, MediaJob>>>,
     media_cancellations: Arc<Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
     media_pauses: Arc<Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+    feed_subscriptions: Mutex<BTreeMap<String, FeedSubscription>>,
     data_dir: PathBuf,
     last_history_save: Mutex<Instant>,
 }
@@ -489,6 +490,8 @@ impl Engine {
         fs::create_dir_all(&settings.download_dir)?;
         let media_history: BTreeMap<String, MediaJob> =
             restore_media_jobs(load_json(&data_dir.join("media_jobs.json"))?.unwrap_or_default());
+        let feed_subscriptions: BTreeMap<String, FeedSubscription> =
+            load_json(&data_dir.join("feeds.json"))?.unwrap_or_default();
         let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json"))?.unwrap_or_default();
         // A process restart may invalidate an old aria2 GID. Avoid showing stale speed.
         for download in history.values_mut() {
@@ -546,7 +549,7 @@ impl Engine {
             client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
-            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(media_history)), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), media_pauses: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
+            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(media_history)), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), media_pauses: Arc::new(Mutex::new(BTreeMap::new())), feed_subscriptions: Mutex::new(feed_subscriptions), data_dir,
             last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
@@ -1258,6 +1261,22 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
 
 // yt-dlp's dedicated progress template is intentionally narrow; no terminal
 // escapes, arbitrary log text, or unbounded captured output is kept in memory.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FeedSubscription {
+    id: String,
+    source: String,
+    title: String,
+    #[serde(default)]
+    auto_download: bool,
+    #[serde(default)]
+    seen_sources: Vec<String>,
+    #[serde(default)]
+    last_checked_unix: u64,
+    #[serde(default)]
+    error: Option<String>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FeedPreview {
@@ -1364,6 +1383,108 @@ async fn inspect_feed(source: String) -> Result<FeedPreview, String> {
         body.extend_from_slice(&chunk);
     }
     parsed_feed(&body)
+}
+
+#[tauri::command]
+fn list_feed_subscriptions(engine: State<'_, Engine>) -> Result<Vec<FeedSubscription>, String> {
+    Ok(engine.feed_subscriptions.lock().map_err(|error| error.to_string())?
+        .values().cloned().collect())
+}
+
+#[tauri::command]
+async fn subscribe_feed(engine: State<'_, Engine>, source: String) -> Result<FeedSubscription, String> {
+    validated_feed_url(&source)?;
+    let preview = inspect_feed(source.clone()).await?;
+    let mut subscriptions = engine.feed_subscriptions.lock().map_err(|error| error.to_string())?;
+    if subscriptions.len() >= 20 { return Err("At most 20 feed subscriptions are supported".into()); }
+    if subscriptions.values().any(|item| item.source == source) {
+        return Err("This feed is already subscribed".into());
+    }
+    let entry = FeedSubscription {
+        id: uuid::Uuid::new_v4().to_string(), source, title: preview.title,
+        auto_download: false,
+        seen_sources: preview.entries.iter().map(|item| item.source.clone()).collect(),
+        last_checked_unix: unix_now(), error: None,
+    };
+    let mut next = subscriptions.clone();
+    next.insert(entry.id.clone(), entry.clone());
+    save_json(&engine.data_dir.join("feeds.json"), &next)?;
+    *subscriptions = next;
+    Ok(entry)
+}
+
+#[tauri::command]
+fn set_feed_auto_download(engine: State<'_, Engine>, id: String, enabled: bool) -> Result<(), String> {
+    let mut subscriptions = engine.feed_subscriptions.lock().map_err(|error| error.to_string())?;
+    let mut next = subscriptions.clone();
+    let item = next.get_mut(&id).ok_or("Unknown feed subscription")?;
+    item.auto_download = enabled;
+    save_json(&engine.data_dir.join("feeds.json"), &next)?;
+    *subscriptions = next;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_feed_subscription(engine: State<'_, Engine>, id: String) -> Result<(), String> {
+    let mut subscriptions = engine.feed_subscriptions.lock().map_err(|error| error.to_string())?;
+    let mut next = subscriptions.clone();
+    if next.remove(&id).is_none() { return Err("Unknown feed subscription".into()); }
+    save_json(&engine.data_dir.join("feeds.json"), &next)?;
+    *subscriptions = next;
+    Ok(())
+}
+
+async fn poll_feed_subscriptions(engine: &Engine) {
+    let subscriptions = match engine.feed_subscriptions.lock() {
+        Ok(entries) => entries.values().filter(|item| item.auto_download &&
+            unix_now().saturating_sub(item.last_checked_unix) >= 900)
+            .cloned().collect::<Vec<_>>(),
+        Err(_) => return,
+    };
+    for original in subscriptions {
+        let result = inspect_feed(original.source.clone()).await;
+        let mut seen = original.seen_sources.clone();
+        let mut last_error = None;
+        match result {
+            Ok(feed) => {
+                for item in feed.entries {
+                    if !item.enclosure || seen.iter().any(|url| url == &item.source) { continue; }
+                    // Remote feed data is not equivalent to a user-pasted URL:
+                    // reject local hosts and nonstandard ports for auto actions.
+                    if validated_feed_url(&item.source).is_err() { continue; }
+                    let duplicate = engine.downloads.lock().map(|entries|
+                        entries.values().any(|download| download.source == item.source)).unwrap_or(true);
+                    if duplicate {
+                        seen.push(item.source);
+                        continue;
+                    }
+                    match enqueue(engine, item.source.clone()).await {
+                        Ok(_) => seen.push(item.source),
+                        Err(error) => last_error = Some(error),
+                    }
+                }
+            }
+            Err(error) => last_error = Some(error),
+        }
+        // Bound persisted dedupe history and apply updates only if the feed
+        // is still subscribed and automatic downloads are still enabled.
+        let keep = seen.len().saturating_sub(1000);
+        seen.drain(..keep);
+        if let Ok(mut current) = engine.feed_subscriptions.lock() {
+            if let Some(item) = current.get(&original.id) {
+                if !item.auto_download || item.source != original.source { continue; }
+            } else { continue; }
+            let mut next = current.clone();
+            if let Some(item) = next.get_mut(&original.id) {
+                item.seen_sources = seen;
+                item.last_checked_unix = unix_now();
+                item.error = last_error;
+            }
+            if let Err(error) = save_json(&engine.data_dir.join("feeds.json"), &next) {
+                eprintln!("Unable to checkpoint RSS feed: {error}");
+            } else { *current = next; }
+        }
+    }
 }
 
 fn playlist_overall_progress(selected: &[u32], index: Option<u32>, percent: f32) -> Option<f32> {
@@ -2096,6 +2217,15 @@ mod tests {
     }
 
     #[test]
+    fn feed_subscription_deserialization_keeps_safe_defaults() {
+        let feed: FeedSubscription = serde_json::from_str(
+            r#"{"id":"abc","source":"https://example.org/rss","title":"Example"}"#).unwrap();
+        assert!(!feed.auto_download);
+        assert!(feed.seen_sources.is_empty());
+        assert_eq!(feed.last_checked_unix, 0);
+    }
+
+    #[test]
     fn rss_parser_exposes_enclosures_and_blocks_private_feeds() {
         let xml = br#"<rss version="2.0"><channel><title>Updates</title>
             <item><title>File 1</title><enclosure url="https://example.org/file.zip" type="application/zip" /></item>
@@ -2363,6 +2493,18 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             app.manage(Engine::start()?);
+            let rss_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                let mut timer = tokio::time::interval(Duration::from_secs(900));
+                timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    timer.tick().await;
+                    if let Some(engine) = rss_handle.try_state::<Engine>() {
+                        poll_feed_subscriptions(&engine).await;
+                    } else { break; }
+                }
+            });
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 use tauri::Manager;
@@ -2380,7 +2522,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
