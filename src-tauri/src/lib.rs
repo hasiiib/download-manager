@@ -1223,6 +1223,9 @@ fn retry_media_download(engine: State<'_, Engine>, id: String) -> Result<MediaJo
 #[tauri::command]
 fn start_media_download(engine: State<'_, Engine>, source: String, format: String, playlist: bool) -> Result<MediaJob, String> {
     media_http_url(&source)?;
+    if playlist && format.starts_with("id:") {
+        return Err("Exact format IDs apply only to one inspected media item, not a playlist".into());
+    }
     let args = media_format_args(&format)?;
     let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
