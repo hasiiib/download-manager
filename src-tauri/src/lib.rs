@@ -1332,6 +1332,13 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
     let mut command = Command::new("yt-dlp");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Give the downloader its own process group so spawned FFmpeg helpers
+        // are paused and stopped together, not left running in the background.
+        command.process_group(0);
+    }
     command.args(["--ignore-config", "--newline", "--no-color", "--no-overwrites", "--restrict-filenames"]);
     if playlist {
         // Bound playlist size; downloading arbitrary thousands of remote entries
@@ -1396,6 +1403,12 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         let mut is_paused = false;
         let (result, cancelled) = loop {
             if stop.load(Ordering::Acquire) {
+                #[cfg(unix)]
+                {
+                    // Group contains only this app-owned yt-dlp child and its
+                    // helper processes; SIGKILL works even when paused.
+                    let _ = unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+                }
                 let _ = child.kill();
                 break (child.wait(), true);
             }
@@ -1406,7 +1419,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
                 let should_pause = pause.load(Ordering::Acquire);
                 if should_pause != is_paused {
                     let signal = if should_pause { libc::SIGSTOP } else { libc::SIGCONT };
-                    let applied = unsafe { libc::kill(child.id() as i32, signal) } == 0;
+                    let applied = unsafe { libc::kill(-(child.id() as i32), signal) } == 0;
                     if applied {
                         is_paused = should_pause;
                         if let Ok(mut entries) = jobs.lock() {
