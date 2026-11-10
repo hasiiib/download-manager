@@ -201,3 +201,7 @@
 .media-modal .media-playlist-toggle{display:flex;align-items:center;gap:10px;margin:12px 0 16px;font-size:12px;color:#d0d9ed;cursor:pointer}
 .media-modal .media-playlist-toggle input[type=checkbox]{width:16px;height:16px;accent-color:#9179ea;flex:none}
 .media-modal .media-playlist-toggle span{line-height:1.45}
+
+/* Inspected yt-dlp media format information. */
+.media-format-note{font-size:11px;line-height:1.55;color:#a9b9d6;margin:3px 0 13px}
+.media-modal select optgroup{background:#131a2e;color:#bcb4f0}
