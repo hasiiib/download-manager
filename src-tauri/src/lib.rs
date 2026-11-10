@@ -58,6 +58,49 @@ impl Settings {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Schedule {
+    state: String,             // idle, armed, running, power_pending, completed, cancelled, error
+    start_at_unix: u64,         // local time converted by UI to Unix seconds
+    concurrent: u8,
+    after_complete: String,    // none, shutdown, sleep
+    gids: Vec<String>,         // exact transfers owned by this schedule
+    power_at_unix: u64,        // 60-second grace period for cancellation
+    message: String,
+}
+
+impl Default for Schedule {
+    fn default() -> Self {
+        Self {
+            state: "idle".into(), start_at_unix: 0, concurrent: 3,
+            after_complete: "none".into(), gids: Vec::new(),
+            power_at_unix: 0, message: String::new(),
+        }
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default().as_secs()
+}
+
+fn validate_schedule_request(start: u64, concurrent: u8, action: &str, now: u64) -> Result<(), String> {
+    if start <= now || start > now.saturating_add(366 * 24 * 60 * 60) {
+        return Err("Choose a future start time within one year".into());
+    }
+    if !(1..=10).contains(&concurrent) { return Err("Concurrent transfers must be 1–10".into()); }
+    if !matches!(action, "none" | "shutdown" | "sleep") {
+        return Err("Invalid completion action".into());
+    }
+    Ok(())
+}
+
+fn scheduled_terminal_state(status: &str) -> bool {
+    matches!(status, "complete" | "error" | "removed")
+}
+
 struct Engine {
     client: reqwest::Client,
     endpoint: String,
@@ -65,6 +108,7 @@ struct Engine {
     child: Mutex<Child>,
     downloads: Mutex<BTreeMap<String, Download>>,
     settings: Mutex<Settings>,
+    schedule: Mutex<Schedule>,
     data_dir: PathBuf,
     last_history_save: Mutex<Instant>,
 }
@@ -218,6 +262,14 @@ impl Engine {
         #[cfg(unix)]
         fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))?;
         let settings = load_validated_settings(&data_dir.join("settings.json"))?;
+        let mut schedule: Schedule = load_json(&data_dir.join("schedule.json"))?.unwrap_or_default();
+        // A crash or reboot must not unexpectedly power off the machine after
+        // launch. Require the user to explicitly arm again for power actions.
+        if matches!(schedule.state.as_str(), "power_pending" | "running") {
+            schedule.state = "cancelled".into();
+            schedule.power_at_unix = 0;
+            schedule.message = "Schedule was interrupted when the app closed. Arm it again.".into();
+        }
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
         let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json"))?.unwrap_or_default();
@@ -276,7 +328,7 @@ impl Engine {
             client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
-            settings: Mutex::new(settings), data_dir,
+            settings: Mutex::new(settings), schedule: Mutex::new(schedule), data_dir,
             last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
