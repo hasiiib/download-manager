@@ -469,6 +469,15 @@ async fn add_batch(engine: State<'_, Engine>, sources: Vec<String>) -> Result<Ba
     Ok(result)
 }
 
+// Only genuinely new child GIDs may be added by a status poll. A GID
+// present at poll start but absent at commit time was removed concurrently.
+fn may_insert_polled_gid(
+    gid: &str,
+    existing_at_poll_start: &std::collections::BTreeSet<String>,
+) -> bool {
+    !existing_at_poll_start.contains(gid)
+}
+
 #[tauri::command]
 async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, String> {
     let snapshot: Vec<Download> = engine.downloads.lock().map_err(|e| e.to_string())?.values().cloned().collect();
@@ -554,7 +563,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
                     entries.insert(item.gid.clone(), item.clone());
                     changed = true;
                 }
-                None if !existing_at_poll_start.contains(&item.gid) => {
+                None if may_insert_polled_gid(&item.gid, &existing_at_poll_start) => {
                     // Newly discovered child transfer (e.g. torrent metadata).
                     urgent = true;
                     entries.insert(item.gid.clone(), item.clone());
@@ -980,6 +989,20 @@ mod tests {
         assert!(load_validated_settings(&path).is_err());
         fs::remove_dir_all(&folder).unwrap();
     }
+    #[test]
+    fn stale_polls_must_not_resurrect_removed_downloads() {
+        let original = std::collections::BTreeSet::from([
+            "removed-during-poll".to_string(),
+            "still-live".to_string(),
+        ]);
+        // A removed or retried entry is no longer in the live map, but the
+        // stale RPC result must not be allowed to recreate it.
+        assert!(!may_insert_polled_gid("removed-during-poll", &original));
+        assert!(!may_insert_polled_gid("still-live", &original));
+        // aria2 follow-up GIDs discovered by the poll are still accepted.
+        assert!(may_insert_polled_gid("new-torrent-child", &original));
+    }
+
     #[test]
     fn failed_history_removal_preserves_download_and_success_persists() {
         let folder = std::env::temp_dir().join(format!("dm-forget-{}", uuid::Uuid::new_v4()));
