@@ -1329,8 +1329,8 @@ fn parsed_feed(bytes: &[u8]) -> Result<FeedPreview, String> {
     let feed = feed_rs::parser::parse(bytes)
         .map_err(|error| format!("Invalid RSS/Atom/JSON feed: {error}"))?;
     let entries = feed.entries.iter().take(50).filter_map(|entry| {
-        let attachment = entry.links.iter().find(|link| link.rel == "enclosure");
-        let link = attachment.or_else(|| entry.links.iter().find(|link| link.rel == "alternate"))
+        let attachment = entry.links.iter().find(|link| link.rel.as_deref() == Some("enclosure"));
+        let link = attachment.or_else(|| entry.links.iter().find(|link| link.rel.as_deref() == Some("alternate")))
             .or_else(|| entry.links.first())?;
         // Enclosure or article links must be explicit HTTP(S); never allow
         // file://, javascript: or other schemes from untrusted feed content.
