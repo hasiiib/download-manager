@@ -224,3 +224,17 @@
 
 /* RSS feed entry URLs and bounded list. */
 .feed-entry-source{display:block;color:#8396b8;font-size:10px;margin-top:4px;overflow-wrap:anywhere}
+
+/* Persisted, opt-in RSS subscriptions and automatic enclosure downloads. */
+.feed-subscriptions{display:flex;flex-direction:column;gap:8px;border:1px solid #364566;background:#172037;border-radius:10px;padding:12px;margin:14px 0}
+.feed-subscriptions h3{font-size:13px;color:#e1e7fa;margin:0}
+.feed-subscriptions>p{font-size:11px;line-height:1.5;color:#adbad2;margin:0 0 5px}
+.feed-subscription{display:flex;align-items:center;justify-content:space-between;gap:10px;border-top:1px solid #343e57;padding:10px 0}
+.feed-subscription>div{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px}
+.feed-subscription strong{font-size:12px;color:#dae5fa}
+.feed-subscription small{color:#a1b2d0;overflow-wrap:anywhere;font-size:10px}
+.feed-subscription label{display:flex;align-items:center;gap:6px;white-space:nowrap;font-size:11px;color:#d1dbea;cursor:pointer}
+.feed-subscription input{width:15px;height:15px;accent-color:#917be4}
+.feed-subscription button{border:1px solid #80536a;color:#ffd1df;background:#3a273c;padding:7px 9px;font-size:10px;border-radius:7px;cursor:pointer}
+.feed-subscription button:disabled{opacity:.6;cursor:wait}
+@media(max-width:620px){.feed-subscription{align-items:flex-start;flex-wrap:wrap}}
