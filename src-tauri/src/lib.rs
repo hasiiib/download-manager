@@ -2229,7 +2229,7 @@ mod tests {
     #[test]
     fn rss_parser_exposes_enclosures_and_blocks_private_feeds() {
         let xml = br#"<rss version="2.0"><channel><title>Updates</title>
-            <item><title>File 1</title><enclosure url="https://example.org/file.zip" type="application/zip" /></item>
+            <item><title>File 1</title><enclosure url="https://example.org/file.zip" length="1234" type="application/zip" /></item>
             <item><title>Web link</title><link>https://example.org/post</link></item>
             </channel></rss>"#;
         let feed = parsed_feed(xml).unwrap();
