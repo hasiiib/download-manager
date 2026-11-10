@@ -191,3 +191,8 @@
 .media-job-list .media-job-cancel:hover{background:#592d49}
 .media-progress{grid-column:1/-1;width:100%;height:9px;accent-color:#8b78ef}
 .media-job-list .media-job-stats{grid-column:1/-1;color:#b9c6e7}
+
+/* Optional media helper availability in the Video dialog. */
+.media-tool-status{display:flex;flex-wrap:wrap;gap:9px 18px;padding:9px 12px;margin:7px 0 15px;background:#1a2435;border:1px solid #364663;border-radius:9px;font-size:11px;color:#b9c9e3}
+.media-tool-status b{color:#e5eafb;font-weight:700}
+.media-job-list .media-job-cancel:focus-visible{outline:2px solid #e9a0c0;outline-offset:2px}
