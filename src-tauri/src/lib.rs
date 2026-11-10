@@ -975,6 +975,150 @@ async fn check_engine(engine: State<'_, Engine>) -> Result<String, String> {
         .ok_or_else(|| "aria2 returned no engine version".to_string())
 }
 
+fn save_schedule(engine: &Engine, schedule: &Schedule) -> Result<(), String> {
+    save_json(&engine.data_dir.join("schedule.json"), schedule)
+}
+
+#[tauri::command]
+fn get_schedule(engine: State<'_, Engine>) -> Result<Schedule, String> {
+    Ok(engine.schedule.lock().map_err(|error| error.to_string())?.clone())
+}
+
+#[tauri::command]
+async fn arm_schedule(
+    engine: State<'_, Engine>, start_at_unix: u64, concurrent: u8,
+    after_complete: String,
+) -> Result<Schedule, String> {
+    validate_schedule_request(start_at_unix, concurrent, &after_complete, unix_now())?;
+    {
+        let current = engine.schedule.lock().map_err(|error| error.to_string())?;
+        if matches!(current.state.as_str(), "armed" | "running" | "power_pending") {
+            return Err("Cancel the existing schedule before creating another".into());
+        }
+    }
+    let gids: Vec<String> = engine.downloads.lock().map_err(|error| error.to_string())?
+        .values().filter(|item| matches!(item.status.as_str(), "active" | "waiting" | "paused"))
+        .map(|item| item.gid.clone()).collect();
+    if gids.is_empty() {
+        return Err("Add a download first; there are no transfers to schedule".into());
+    }
+    // Pause the private engine before arming; even if persisting fails the
+    // user can Resume All. Never modify an unrelated aria2 instance.
+    engine.rpc("pauseAll", vec![]).await?;
+    let schedule = Schedule {
+        state: "armed".into(), start_at_unix, concurrent, after_complete,
+        gids, power_at_unix: 0,
+        message: "Queue paused until the selected time. Keep Download Manager running.".into(),
+    };
+    let mut current = engine.schedule.lock().map_err(|error| error.to_string())?;
+    save_schedule(&engine, &schedule)?;
+    *current = schedule.clone();
+    Ok(schedule)
+}
+
+#[tauri::command]
+fn cancel_schedule(engine: State<'_, Engine>) -> Result<Schedule, String> {
+    let mut schedule = engine.schedule.lock().map_err(|error| error.to_string())?;
+    if !matches!(schedule.state.as_str(), "armed" | "running" | "power_pending") {
+        return Err("There is no active schedule to cancel".into());
+    }
+    let mut next = schedule.clone();
+    next.state = "cancelled".into();
+    next.power_at_unix = 0;
+    next.message = "Schedule cancelled. Downloads remain in their current state.".into();
+    save_schedule(&engine, &next)?;
+    *schedule = next.clone();
+    Ok(next)
+}
+
+// Runs only while the desktop app is open; the engine is a managed Tauri
+// resource. Scheduler state is checkpointed across ordinary UI navigation.
+async fn schedule_tick(engine: &Engine) {
+    let schedule = match engine.schedule.lock() {
+        Ok(lock) => lock.clone(), Err(_) => return,
+    };
+    let now = unix_now();
+    if schedule.state == "armed" && now >= schedule.start_at_unix {
+        let options = json!({"max-concurrent-downloads": schedule.concurrent.to_string()});
+        if let Err(error) = engine.rpc("changeGlobalOption", vec![options]).await {
+            eprintln!("Scheduler could not set concurrency: {error}");
+            return;
+        }
+        if let Err(error) = engine.rpc("unpauseAll", vec![]).await {
+            eprintln!("Scheduler could not resume transfers: {error}");
+            return;
+        }
+        if let Ok(mut lock) = engine.schedule.lock() {
+            if lock.state != "armed" { return; }
+            let mut next = lock.clone();
+            next.state = "running".into();
+            next.message = "Scheduled downloads started.".into();
+            if save_schedule(engine, &next).is_ok() { *lock = next; }
+        }
+        return;
+    }
+    if schedule.state == "running" {
+        if schedule.gids.is_empty() { return; }
+        let mut completed = 0usize;
+        let mut failed = 0usize;
+        for gid in &schedule.gids {
+            // An RPC failure is unknown, never evidence that all files finished.
+            let status = match engine.rpc("tellStatus", vec![json!(gid)]).await {
+                Ok(value) => value,
+                Err(_) => return,
+            };
+            match status.get("status").and_then(Value::as_str) {
+                Some("complete") => completed += 1,
+                Some("error" | "removed") => failed += 1,
+                _ => {}
+            }
+        }
+        if completed + failed != schedule.gids.len() { return; }
+        if let Ok(mut lock) = engine.schedule.lock() {
+            if lock.state != "running" { return; }
+            let mut next = lock.clone();
+            if failed > 0 || schedule.after_complete == "none" {
+                next.state = "completed".into();
+                next.message = if failed > 0 {
+                    format!("{failed} scheduled transfer(s) failed; power action skipped.")
+                } else {
+                    "All scheduled transfers completed.".into()
+                };
+            } else {
+                next.state = "power_pending".into();
+                next.power_at_unix = now.saturating_add(60);
+                next.message = format!("All scheduled transfers complete. {} in 60 seconds. Cancel the schedule to stop it.",
+                    if next.after_complete == "sleep" { "Sleep" } else { "Shutdown" });
+            }
+            if save_schedule(engine, &next).is_ok() { *lock = next; }
+        }
+        return;
+    }
+    if schedule.state == "power_pending" && now >= schedule.power_at_unix {
+        // Re-check before acting, including after the grace period. Mark
+        // completed before launch to avoid issuing a second power command.
+        let action = if schedule.after_complete == "sleep" { "suspend" } else { "poweroff" };
+        let mut lock = match engine.schedule.lock() { Ok(lock) => lock, Err(_) => return };
+        if lock.state != "power_pending" || lock.power_at_unix > unix_now() { return; }
+        let mut next = lock.clone();
+        next.state = "completed".into();
+        next.message = format!("Requested system {action} after scheduled completion.");
+        if save_schedule(engine, &next).is_err() { return; }
+        *lock = next;
+        #[cfg(target_os = "linux")]
+        {
+            // Explicitly user-selected system action. No shell is invoked.
+            let result = Command::new("systemctl").arg(action)
+                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+            if let Err(error) = result {
+                eprintln!("Scheduled power action could not launch: {error}");
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        eprintln!("Scheduled power action is not implemented on this OS");
+    }
+}
+
 #[tauri::command]
 fn get_settings(engine: State<'_, Engine>) -> Result<Settings, String> {
     Ok(engine.settings.lock().map_err(|e| e.to_string())?.clone())
@@ -1294,6 +1438,22 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_validates_time_limit_and_power_action() {
+        let now = 1_700_000_000;
+        assert!(validate_schedule_request(now + 120, 3, "none", now).is_ok());
+        assert!(validate_schedule_request(now + 120, 10, "shutdown", now).is_ok());
+        assert!(validate_schedule_request(now + 120, 1, "sleep", now).is_ok());
+        assert!(validate_schedule_request(now, 3, "none", now).is_err());
+        assert!(validate_schedule_request(now - 60, 3, "none", now).is_err());
+        assert!(validate_schedule_request(now + 10, 0, "none", now).is_err());
+        assert!(validate_schedule_request(now + 10, 11, "none", now).is_err());
+        assert!(validate_schedule_request(now + 10, 3, "delete", now).is_err());
+        assert!(scheduled_terminal_state("complete"));
+        assert!(scheduled_terminal_state("error"));
+        assert!(!scheduled_terminal_state("paused"));
+    }
+
+    #[test]
     fn bulk_pause_resume_updates_only_eligible_history() {
         let make = |gid: &str, status: &str| Download {
             gid: gid.into(), source: "https://example.org/file".into(),
@@ -1422,10 +1582,24 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             app.manage(Engine::start()?);
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                use tauri::Manager;
+                let mut timer = tokio::time::interval(Duration::from_secs(5));
+                timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    timer.tick().await;
+                    if let Some(engine) = handle.try_state::<Engine>() {
+                        schedule_tick(&engine).await;
+                    } else {
+                        break;
+                    }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
