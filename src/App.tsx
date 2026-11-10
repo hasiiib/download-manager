@@ -35,6 +35,7 @@ type Settings = {
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
 type MediaFormat = { id: string; extension: string; resolution: string; note: string; filesize: number | null };
+type FeedPreview = { title: string; entries: { title: string; source: string; enclosure: boolean }[] };
 type PlaylistPreview = { title: string; entries: { index: number; title: string; durationSeconds: number | null }[] };
 type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string; formats: MediaFormat[] };
 type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; playlistItems: number[]; error: string | null; progress: number | null; speed: string; eta: string; currentItem: string; playlistIndex: number | null; overallProgress: number | null };
@@ -107,6 +108,12 @@ export default function App() {
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaFormat, setMediaFormat] = useState("mp4");
   const [mediaPlaylist, setMediaPlaylist] = useState(false);
+  const [feedOpen, setFeedOpen] = useState(false);
+  const [feedUrl, setFeedUrl] = useState("");
+  const [feedPreview, setFeedPreview] = useState<FeedPreview | null>(null);
+  const [feedSelection, setFeedSelection] = useState<number[]>([]);
+  const [feedBusy, setFeedBusy] = useState(false);
+  const [feedError, setFeedError] = useState("");
   const [playlistPreview, setPlaylistPreview] = useState<PlaylistPreview | null>(null);
   const [selectedPlaylistItems, setSelectedPlaylistItems] = useState<number[]>([]);
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
@@ -377,6 +384,37 @@ export default function App() {
     }
   };
 
+  const inspectFeed = async () => {
+    setFeedBusy(true);
+    setFeedError("");
+    setFeedPreview(null);
+    setFeedSelection([]);
+    try {
+      const result = await invoke<FeedPreview>("inspect_feed", { source: feedUrl.trim() });
+      setFeedPreview(result);
+      setFeedSelection(result.entries.map((_, i) => i));
+    } catch (error) { setFeedError(String(error)); }
+    finally { setFeedBusy(false); }
+  };
+
+  const addFeedEntries = async () => {
+    if (!feedPreview || feedSelection.length === 0) {
+      setFeedError("Select at least one entry.");
+      return;
+    }
+    setFeedBusy(true);
+    setFeedError("");
+    try {
+      const sources = feedPreview.entries
+        .filter((_, i) => feedSelection.includes(i)).map(item => item.source);
+      const result = await invoke<{ added: number; errors: string[] }>("add_batch", { sources });
+      await refresh();
+      setFeedError(result.added + " link(s) queued." +
+        (result.errors.length ? " " + result.errors.join(" | ") : ""));
+    } catch (error) { setFeedError(String(error)); }
+    finally { setFeedBusy(false); }
+  };
+
   const inspectPlaylist = async () => {
     setMediaBusy(true);
     setMediaError("");
@@ -540,7 +578,7 @@ export default function App() {
       {refreshError && filter !== "all" && <p className="engine-notice" role="alert">Engine: {refreshError}</p>}
       {schedule && ["armed","running","power_pending"].includes(schedule.state) && <div className="schedule-banner" role="status"><div><strong>{schedule.state === "armed" ? "Scheduled" : schedule.state === "running" ? "Schedule running" : "Power action pending"}</strong><span>{schedule.message}</span><small>{schedule.state === "armed" ? "Starts " + new Date(schedule.startAtUnix * 1000).toLocaleString() : schedule.state === "power_pending" ? "Power action at " + new Date(schedule.powerAtUnix * 1000).toLocaleTimeString() : "Monitoring " + schedule.gids.length + " transfers"}</small></div><button type="button" disabled={working} onClick={() => void cancelSchedule()}>Cancel schedule</button></div>}
       {actionFeedback && <div className="action-feedback" role="status"><span>{actionFeedback}</span><button type="button" aria-label="Dismiss notification" onClick={() => setActionFeedback("")}><X size={14}/></button></div>}
-      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setMediaError(""); setMediaOpen(true); }} title="Download video or audio using optional yt-dlp"><Video size={14}/> Video</button><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setFeedError(""); setFeedOpen(true); }} title="Inspect RSS/Atom feed and queue links"><Link2 size={14}/> RSS feed</button><button type="button" className="bulk-control" onClick={() => { setMediaError(""); setMediaOpen(true); }} title="Download video or audio using optional yt-dlp"><Video size={14}/> Video</button><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
@@ -562,6 +600,19 @@ export default function App() {
       </section>
       <footer><span><SlidersHorizontal size={15}/> Parallel connections, torrents and magnet links powered by aria2.</span><span>LINUX FIRST · CROSS-PLATFORM ROADMAP</span></footer>
     </main>
+    {feedOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setFeedOpen(false); }}>
+      <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="RSS feed inspector">
+        <div className="modal-title"><div><Link2 size={22}/><h2>RSS / Atom feeds</h2></div><button aria-label="Close RSS inspector" onClick={() => setFeedOpen(false)}><X size={18}/></button></div>
+        <p>Inspect an RSS, Atom or JSON feed and select links to add to the aria2 queue. Enclosures are preferred. Article links may download an HTML page rather than a media file.</p>
+        <label><span>Public HTTP/HTTPS feed URL</span><input type="url" value={feedUrl} onChange={event => { setFeedUrl(event.target.value); setFeedPreview(null); setFeedSelection([]); }} placeholder="https://example.org/feed.xml"/></label>
+        <div className="media-actions"><button type="button" disabled={feedBusy || !feedUrl.trim()} onClick={() => void inspectFeed()}>{feedBusy ? "Checking..." : "Inspect feed"}</button></div>
+        {feedPreview && <div className="playlist-inspection"><strong>{feedPreview.title} · {feedSelection.length} selected</strong><div className="playlist-select-actions"><button type="button" onClick={() => setFeedSelection(feedPreview.entries.map((_, i) => i))}>Select all</button><button type="button" onClick={() => setFeedSelection([])}>Select none</button><button type="button" onClick={() => setFeedSelection(feedPreview.entries.map((entry, i) => entry.enclosure ? i : -1).filter(i => i >= 0))}>Enclosures only</button></div>
+          <div className="playlist-inspection-rows">{feedPreview.entries.map((entry, i) => <label key={i}><input type="checkbox" checked={feedSelection.includes(i)} onChange={event => setFeedSelection(indices => event.target.checked ? [...indices, i] : indices.filter(n => n !== i))}/><span>{entry.enclosure ? "📎 " : "🔗 "}{entry.title}<small className="feed-entry-source">{entry.source}</small></span></label>)}</div>
+        </div>}
+        {feedError && <p className="settings-note" role="status">{feedError}</p>}
+        <div className="modal-actions"><button type="button" onClick={() => setFeedOpen(false)}>Close</button><button type="button" disabled={feedBusy || !feedPreview || feedSelection.length === 0} onClick={() => void addFeedEntries()}>{feedBusy ? "Queueing..." : "Queue selected links"}</button></div>
+      </section>
+    </div>}
     {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
       <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
         <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
