@@ -149,7 +149,7 @@ async fn media_tools_status() -> Result<MediaTools, String> {
 
 fn restore_media_jobs(mut jobs: BTreeMap<String, MediaJob>) -> BTreeMap<String, MediaJob> {
     for job in jobs.values_mut() {
-        if job.status == "downloading" {
+        if matches!(job.status.as_str(), "downloading" | "paused") {
             job.status = "interrupted".into();
             job.error = Some("Download Manager restarted. Retry to continue using yt-dlp's partial files.".into());
             job.speed.clear();
@@ -253,6 +253,7 @@ struct Engine {
     schedule: Mutex<Schedule>,
     media_jobs: Arc<Mutex<BTreeMap<String, MediaJob>>>,
     media_cancellations: Arc<Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
+    media_pauses: Arc<Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
     data_dir: PathBuf,
     last_history_save: Mutex<Instant>,
 }
@@ -475,7 +476,7 @@ impl Engine {
             client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
-            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(media_history)), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
+            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(media_history)), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), media_pauses: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
             last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
@@ -1206,6 +1207,31 @@ fn cancel_media_download(engine: State<'_, Engine>, id: String) -> Result<(), St
 }
 
 #[tauri::command]
+fn control_media_download(engine: State<'_, Engine>, id: String, action: String) -> Result<(), String> {
+    if !matches!(action.as_str(), "pause" | "resume") {
+        return Err("Invalid media control action".into());
+    }
+    #[cfg(not(unix))]
+    { return Err("Media pause/resume is currently supported on Linux and other Unix desktops only".into()); }
+    #[cfg(unix)]
+    {
+        let flags = engine.media_pauses.lock().map_err(|error| error.to_string())?;
+        let flag = flags.get(&id).ok_or("Media job is not running")?;
+        let jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+        let job = jobs.get(&id).ok_or("Media job not found")?;
+        if action == "pause" && job.status != "downloading" {
+            return Err("Only a downloading media job can be paused".into());
+        }
+        if action == "resume" && job.status != "paused" {
+            return Err("Only a paused media job can be resumed".into());
+        }
+        // Worker is the sole owner of its Child and applies the signal.
+        flag.store(action == "pause", Ordering::Release);
+        Ok(())
+    }
+}
+
+#[tauri::command]
 fn retry_media_download(engine: State<'_, Engine>, id: String) -> Result<MediaJob, String> {
     let original = {
         let jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
@@ -1256,11 +1282,14 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
             eprintln!("Media launched, but its history could not be persisted: {error}");
         }
     }
+    let pause = Arc::new(AtomicBool::new(false));
+    engine.media_pauses.lock().map_err(|error| error.to_string())?.insert(id.clone(), Arc::clone(&pause));
     let stop = Arc::new(AtomicBool::new(false));
     engine.media_cancellations.lock().map_err(|error| error.to_string())?
         .insert(id.clone(), Arc::clone(&stop));
     let jobs = Arc::clone(&engine.media_jobs);
     let cancellations = Arc::clone(&engine.media_cancellations);
+    let pauses = Arc::clone(&engine.media_pauses);
     let media_history_path = engine.data_dir.join("media_jobs.json");
     let reader_jobs = Arc::clone(&jobs);
     let reader_id = id.clone();
@@ -1281,10 +1310,35 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         }
     }));
     std::thread::spawn(move || {
+        let mut is_paused = false;
         let (result, cancelled) = loop {
             if stop.load(Ordering::Acquire) {
                 let _ = child.kill();
                 break (child.wait(), true);
+            }
+            // Applying SIGSTOP/SIGCONT here rather than from the UI avoids
+            // signals to a PID that has already exited/recycled.
+            #[cfg(unix)]
+            {
+                let should_pause = pause.load(Ordering::Acquire);
+                if should_pause != is_paused {
+                    let signal = if should_pause { libc::SIGSTOP } else { libc::SIGCONT };
+                    let applied = unsafe { libc::kill(child.id() as i32, signal) } == 0;
+                    if applied {
+                        is_paused = should_pause;
+                        if let Ok(mut entries) = jobs.lock() {
+                            if let Some(entry) = entries.get_mut(&id) {
+                                entry.status = if is_paused { "paused" } else { "downloading" }.into();
+                                if is_paused { entry.speed.clear(); entry.eta.clear(); }
+                            }
+                            if let Err(error) = save_json(&media_history_path, &*entries) {
+                                eprintln!("Unable to checkpoint media pause state: {error}");
+                            }
+                        }
+                    } else {
+                        eprintln!("Failed to change yt-dlp pause state");
+                    }
+                }
             }
             match child.try_wait() {
                 Ok(Some(status)) => break (Ok(status), false),
@@ -1325,6 +1379,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
             }
         }
         if let Ok(mut entries) = cancellations.lock() { entries.remove(&id); }
+        if let Ok(mut entries) = pauses.lock() { entries.remove(&id); }
     });
     Ok(job)
 }
@@ -1814,6 +1869,17 @@ mod tests {
     }
 
     #[test]
+    fn paused_media_is_interrupted_on_restart() {
+        let jobs = BTreeMap::from([("pause".into(), MediaJob {
+            id: "pause".into(), title: "https://example.org/watch".into(),
+            status: "paused".into(), format: "mp4".into(), playlist: false,
+            error: None, progress: Some(12.0), speed: String::new(), eta: String::new(),
+        })]);
+        let resumed = restore_media_jobs(jobs);
+        assert_eq!(resumed["pause"].status, "interrupted");
+    }
+
+    #[test]
     fn media_restart_marks_in_flight_jobs_interrupted() {
         let job = MediaJob {
             id: "one".into(), title: "https://example.org/video".into(),
@@ -2048,7 +2114,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, media_tools_status, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
