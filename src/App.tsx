@@ -34,7 +34,8 @@ type Settings = {
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
-type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string };
+type MediaFormat = { id: string; extension: string; resolution: string; note: string; filesize: number | null };
+type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string; formats: MediaFormat[] };
 type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; error: string | null; progress: number | null; speed: string; eta: string };
 type MediaTools = { ytDlp: string | null; ffmpeg: string | null };
 
@@ -103,7 +104,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaFormat, setMediaFormat] = useState<"best" | "mp4" | "audio" | "720p" | "1080p">("mp4");
+  const [mediaFormat, setMediaFormat] = useState("mp4");
   const [mediaPlaylist, setMediaPlaylist] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
@@ -370,6 +371,7 @@ export default function App() {
     try {
       const info = await invoke<MediaPreview>("preview_media", { source: mediaUrl.trim() });
       setMediaPreview(info);
+      setMediaFormat("mp4");
     } catch (error) { setMediaError(String(error)); }
     finally { setMediaBusy(false); }
   };
@@ -528,10 +530,11 @@ export default function App() {
       <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
         <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
         <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg. No software is auto-installed.</p>{mediaTools && <div className="media-tool-status" role="status"><span>yt-dlp: <b>{mediaTools.ytDlp ? "Installed (" + mediaTools.ytDlp + ")" : "Missing"}</b></span><span>FFmpeg: <b>{mediaTools.ffmpeg ? "Installed" : "Missing (needed for merging / MP3)"}</b></span></div>}
-        <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); }} placeholder="https://example.com/video"/></label>
+        <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); setMediaFormat("mp4"); }} placeholder="https://example.com/video"/></label>
         <div className="media-actions"><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectMedia()}>{mediaBusy ? "Working..." : "Inspect media"}</button></div>
         {mediaPreview && <div className="media-preview"><strong>{mediaPreview.title}</strong>{mediaPreview.uploader && <small>{mediaPreview.uploader}</small>}{mediaPreview.durationSeconds != null && <small>Duration: {Math.floor(mediaPreview.durationSeconds / 60)}m {Math.floor(mediaPreview.durationSeconds % 60)}s</small>}<small>yt-dlp {mediaPreview.ytDlpVersion}</small></div>}
-        <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value as "best" | "mp4" | "audio" | "720p" | "1080p")}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="1080p">Up to 1080p video</option><option value="720p">Up to 720p video</option><option value="audio">MP3 audio</option></select></label>
+        <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value)}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="1080p">Up to 1080p video</option><option value="720p">Up to 720p video</option><option value="audio">MP3 audio</option>{mediaPreview && mediaPreview.formats.length > 0 && <optgroup label="Available formats from inspected media">{mediaPreview.formats.map(fmt => <option key={fmt.id} value={"id:" + fmt.id}>{fmt.id} · {fmt.extension || "unknown"} · {fmt.resolution}{fmt.note ? " · " + fmt.note : ""}{fmt.filesize != null ? " · " + formatSize(fmt.filesize) : ""}</option>)}</optgroup>}</select></label>
+        {mediaPreview && mediaPreview.formats.length > 0 && <p className="media-format-note">{mediaPreview.formats.length} available format(s) found. Selecting an exact format may download video-only or audio-only; use a preset for automatic merging.</p>}
         <label className="media-playlist-toggle"><input type="checkbox" checked={mediaPlaylist} onChange={event => setMediaPlaylist(event.target.checked)}/><span>Download playlist (up to 50 items, one job)</span></label>
         {mediaJobs.length > 0 && <div className="media-job-list" aria-label="Media download jobs">{mediaJobs.map(job => <div key={job.id}><span title={job.title}>{job.title}</span><strong className={job.status === "error" ? "media-job-error" : ""}>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>{job.status === "downloading" && <button type="button" className="media-job-cancel" onClick={() => void cancelMedia(job.id)} aria-label={"Cancel media download " + job.title}>Cancel</button>}{["error","cancelled","interrupted"].includes(job.status) && <button type="button" className="media-job-cancel" onClick={() => void retryMedia(job.id)} aria-label={"Retry media download " + job.title}>Retry</button>}{job.progress != null && <progress className="media-progress" max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}{job.status === "downloading" && (job.speed || job.eta) && <small className="media-job-stats">{job.speed}{job.speed && job.eta ? " · " : ""}{job.eta && "ETA " + job.eta}</small>}{job.error && <small>{job.error}</small>}</div>)}</div>}
         {mediaError && <p className="settings-note" role="status">{mediaError}</p>}
