@@ -431,3 +431,11 @@ The Ubuntu test suite previously passed before these changes, but **the new Rust
 - Rust unit tests were added for queue ordering and recovering-state eligibility.
 
 This development was committed without a local Cargo toolchain or laptop-accessible Ubuntu test. **Passing compilation and real-world queue/session behavior are not yet confirmed.** When desktop access returns, close the app and run `bash ~/download-manager/scripts/update-ubuntu.sh` for the full update/QA/build/installation sequence, then test queued transfers and restart recovery.
+
+## Feature inspiration: Mister Download Manager (November 2026)
+
+Reviewed [anefzaoui/misterdownloadmanager](https://github.com/anefzaoui/misterdownloadmanager), a Rust download manager with published Linux support. Its documented feature set includes a scheduler, browser integration, video downloading via optional tools, RSS feeds, queue operations, themes, language choices, and **Delete All Completed**. These are reference features, not evidence that our implementation supports them. That upstream repository is **GPL-3.0**; no upstream source code, artwork or bundled binary was copied.
+
+As an immediate, low-overhead addition, this project now provides **Clear completed** from the All downloads and Completed views. It asks for confirmation and atomically removes only completed records from our download history JSON; **downloaded files on disk are never deleted**. The action is disabled/hidden when no completed records exist, keeps failed/paused entries, and reports the number removed. Rust regression coverage checks the successful update, no-op behavior and preservation of in-memory/on-disk history after a failed save. No new library, file watcher, process or polling timer is required.
+
+Future candidates from that feature comparison: Pause All/Resume All, a scheduler, browser hand-off, RSS queues, and optional video downloader integration. Each needs separate security, UX and resource-use design and must not be advertised as implemented yet. The new feature is committed but **not yet tested in a full Ubuntu build**, since the tester's laptop is currently unavailable. On return, close the app then run `bash ~/download-manager/scripts/update-ubuntu.sh`.
