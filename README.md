@@ -421,3 +421,13 @@ While desktop access is unavailable, history operations were hardened without ch
 - Rust regression tests cover a simulated failed write, active/paused removal rejection, successful history removal, and the distinction between stale and newly discovered GIDs.
 
 The Ubuntu test suite previously passed before these changes, but **the new Rust code has not yet been compiled or run on Ubuntu**. When a laptop is available, close the app and use the existing one-command `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, run QA, build/verify the Debian package, reinstall, and launch. Then verify Forget from history and Retry alongside normal download flows.
+
+## Queue ordering and restart reconciliation (offline development)
+
+- Downloads that were active, waiting or paused before app restart now enter a temporary **recovering** state until the new aria2 session answers `tellStatus`. Missing GIDs become **interrupted** only after an explicit missing-GID response. A transient RPC failure leaves the transfer recovering rather than claiming it is gone, preventing premature duplicate retries.
+- The **In progress** filter includes recovering transfers, but avoids displaying transfer controls before the current aria2 state is known.
+- Waiting transfers are presented according to aria2's live `tellWaiting` queue order rather than the download-history map's lexical GID order. The list uses **one additional local RPC when waiting transfers exist**, not an RPC per row. If queue lookup fails, the existing display order remains in use. The existing Recent sort label remains the default ordering, with waiting transfers prioritized by queue position.
+- Concurrent history removal/retry is reflected in the current list response: a slow status poll can no longer momentarily display a row that has since been deleted from the live history map.
+- Rust unit tests were added for queue ordering and recovering-state eligibility.
+
+This development was committed without a local Cargo toolchain or laptop-accessible Ubuntu test. **Passing compilation and real-world queue/session behavior are not yet confirmed.** When desktop access returns, close the app and run `bash ~/download-manager/scripts/update-ubuntu.sh` for the full update/QA/build/installation sequence, then test queued transfers and restart recovery.
