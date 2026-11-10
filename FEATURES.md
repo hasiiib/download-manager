@@ -22,7 +22,7 @@ This ordering is for implementation priority only. No requested feature is dropp
 - [x] Download history and completed-history cleanup
 - [x] Atomic history/settings writes with backup recovery
 - [ ] Verify resumed, interrupted and torrent downloads end-to-end after restart on Ubuntu
-- [ ] Download accelerator controls with benchmarks: segmented connections and minimum segment-size tuning now committed (unverified); per-host and global limits, adaptive tuning, measured speed gains and reliable range fallback remain to build/test
+- [ ] Download accelerator controls with benchmarks: 1–32 requested segments with stock aria2 per-server connection limit capped at 16 to avoid startup failure, plus minimum segment-size tuning committed (Ubuntu verification pending). True 32 connections to a single server requires another supporting engine/fork; adaptive tuning, measured speed gains and reliable range fallback remain to build/test
 - [ ] Batch rename, move and duplicate detection with overwrite policies
 - [ ] File integrity verification, hashes and optional malware scanning
 - [ ] Queue groups, priorities, simultaneous transfer profiles and scheduling
