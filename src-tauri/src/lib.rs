@@ -28,6 +28,8 @@ struct Download {
 #[serde(rename_all = "camelCase")]
 struct Settings {
     connections: u8,
+    #[serde(default = "default_min_split_size_mib")]
+    min_split_size_mib: u8,
     concurrent: u8,
     speed_limit_kib: u64,
     #[serde(default)]
@@ -39,17 +41,19 @@ struct Settings {
     low_memory_mode: bool,
 }
 
+fn default_min_split_size_mib() -> u8 { 4 }
 fn default_refresh_seconds() -> u8 { 3 }
 fn default_low_memory_mode() -> bool { true }
 
 impl Settings {
     fn defaults() -> Self {
         let folder = home().join("Downloads");
-        Self { connections: 8, concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned(),
+        Self { connections: 8, min_split_size_mib: default_min_split_size_mib(), concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned(),
             refresh_seconds: default_refresh_seconds(), low_memory_mode: default_low_memory_mode() }
     }
     fn validate(&self) -> Result<(), String> {
         if !(1..=16).contains(&self.connections) { return Err("Connections must be 1–16".into()); }
+        if !(1..=64).contains(&self.min_split_size_mib) { return Err("Minimum segment size must be 1–64 MiB".into()); }
         if !(1..=10).contains(&self.concurrent) { return Err("Concurrent downloads must be 1–10".into()); }
         if self.download_dir.trim().is_empty() { return Err("Download folder cannot be empty".into()); }
         if !(1..=30).contains(&self.refresh_seconds) { return Err("Refresh interval must be 1–30 seconds".into()); }
@@ -315,6 +319,7 @@ impl Engine {
             .arg(format!("--save-session={}", session.display()))
             .arg(format!("--dir={}", settings.download_dir))
             .arg(format!("--split={}", settings.connections))
+            .arg(format!("--min-split-size={}M", settings.min_split_size_mib))
             .arg(format!("--max-connection-per-server={}", settings.connections))
             .arg(format!("--max-concurrent-downloads={}", settings.concurrent))
             .arg(format!("--max-overall-download-limit={}K", settings.speed_limit_kib))
@@ -454,6 +459,7 @@ async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
         "dir": settings.download_dir,
         "split": settings.connections.to_string(),
         "max-connection-per-server": settings.connections.to_string(),
+        "min-split-size": format!("{}M", settings.min_split_size_mib),
         "continue": "true",
     });
     let gid = if input.starts_with("magnet:?") {
@@ -1529,6 +1535,11 @@ mod tests {
         assert!(settings.validate().is_err());
         settings.connections = 16;
         assert!(settings.validate().is_ok());
+        settings.min_split_size_mib = 0;
+        assert!(settings.validate().is_err());
+        settings.min_split_size_mib = 64;
+        assert!(settings.validate().is_ok());
+        settings.min_split_size_mib = 4;
         settings.concurrent = 11;
         assert!(settings.validate().is_err());
         settings.concurrent = 3;
