@@ -527,3 +527,7 @@ This is an initial implementation. RSS polling does not run when the app is clos
 ## Aria2 engine compatibility: 32 requested segments
 
 **Correction to earlier connection wording:** stock aria2 1.37 caps `max-connection-per-server` at **16**. Passing 32 for that option can prevent aria2 from starting. The application therefore allows users to request **1–32 parallel segments** via `--split` but caps `--max-connection-per-server` to 16 at startup and for newly queued jobs. The UI now labels this distinction explicitly. This means **32 simultaneous connections to one host are not provided by stock aria2**. A different engine/fork would be required to deliver that specific capability; it remains a tracked improvement. Unit tests cover the cap. More segments do not guarantee faster downloads.
+
+## Scheduler restart safety
+
+An armed, running or power-pending schedule is **cancelled on application restart**. Recovered aria2 transfers can start as soon as aria2 restores its session, so the app must never imply that a previous scheduled start time still controls them. Restarted schedules cannot trigger a stale automatic sleep/shutdown command. Users should re-arm a new schedule only after reviewing the restored queue. A scheduler that survives app exits without starting early needs a persistent service or improved queue persistence; this is not implemented yet.
