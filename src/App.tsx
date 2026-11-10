@@ -35,7 +35,7 @@ type Settings = {
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
 type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string };
-type MediaJob = { id: string; title: string; status: string; format: string; error: string | null; progress: number | null; speed: string; eta: string };
+type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; error: string | null; progress: number | null; speed: string; eta: string };
 type MediaTools = { ytDlp: string | null; ffmpeg: string | null };
 
 type Schedule = {
@@ -103,7 +103,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaFormat, setMediaFormat] = useState<"best" | "mp4" | "audio">("mp4");
+  const [mediaFormat, setMediaFormat] = useState<"best" | "mp4" | "audio" | "720p" | "1080p">("mp4");
+  const [mediaPlaylist, setMediaPlaylist] = useState(false);
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [mediaTools, setMediaTools] = useState<MediaTools | null>(null);
@@ -378,7 +379,7 @@ export default function App() {
     setMediaError("");
     try {
       const job = await invoke<MediaJob>("start_media_download", {
-        source: mediaUrl.trim(), format: mediaFormat,
+        source: mediaUrl.trim(), format: mediaFormat, playlist: mediaPlaylist,
       });
       setMediaJobs(jobs => [...jobs, job]);
       setMediaPreview(null);
@@ -530,7 +531,8 @@ export default function App() {
         <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); }} placeholder="https://example.com/video"/></label>
         <div className="media-actions"><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectMedia()}>{mediaBusy ? "Working..." : "Inspect media"}</button></div>
         {mediaPreview && <div className="media-preview"><strong>{mediaPreview.title}</strong>{mediaPreview.uploader && <small>{mediaPreview.uploader}</small>}{mediaPreview.durationSeconds != null && <small>Duration: {Math.floor(mediaPreview.durationSeconds / 60)}m {Math.floor(mediaPreview.durationSeconds % 60)}s</small>}<small>yt-dlp {mediaPreview.ytDlpVersion}</small></div>}
-        <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value as "best" | "mp4" | "audio")}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="audio">MP3 audio</option></select></label>
+        <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value as "best" | "mp4" | "audio" | "720p" | "1080p")}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="1080p">Up to 1080p video</option><option value="720p">Up to 720p video</option><option value="audio">MP3 audio</option></select></label>
+        <label className="media-playlist-toggle"><input type="checkbox" checked={mediaPlaylist} onChange={event => setMediaPlaylist(event.target.checked)}/><span>Download playlist (up to 50 items, one job)</span></label>
         {mediaJobs.length > 0 && <div className="media-job-list" aria-label="Media download jobs">{mediaJobs.map(job => <div key={job.id}><span title={job.title}>{job.title}</span><strong className={job.status === "error" ? "media-job-error" : ""}>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>{job.status === "downloading" && <button type="button" className="media-job-cancel" onClick={() => void cancelMedia(job.id)} aria-label={"Cancel media download " + job.title}>Cancel</button>}{["error","cancelled","interrupted"].includes(job.status) && <button type="button" className="media-job-cancel" onClick={() => void retryMedia(job.id)} aria-label={"Retry media download " + job.title}>Retry</button>}{job.progress != null && <progress className="media-progress" max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}{job.status === "downloading" && (job.speed || job.eta) && <small className="media-job-stats">{job.speed}{job.speed && job.eta ? " · " : ""}{job.eta && "ETA " + job.eta}</small>}{job.error && <small>{job.error}</small>}</div>)}</div>}
         {mediaError && <p className="settings-note" role="status">{mediaError}</p>}
         <div className="modal-actions"><button type="button" onClick={() => setMediaOpen(false)}>Close</button><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void startMedia()}>{mediaBusy ? "Starting..." : "Start media download"}</button></div>
