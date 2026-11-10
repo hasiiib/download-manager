@@ -37,7 +37,7 @@ This ordering is for implementation priority only. No requested feature is dropp
 
 ## Media, RSS and sources (high priority)
 - [ ] yt-dlp and ffmpeg integration: optional yt-dlp metadata inspection and single-item MP4/best-video/MP3 job launching implemented provisionally; playlist first-50-items opt-in and 720p/1080p presets now implemented provisionally, alongside live progress/speed/ETA, per-job cancel, installed-tool detection, retry and persistent history; Linux/Unix media pause/resume and playlist item index/progress now implemented provisionally; per-item playlist selection and estimated selected-item overall progress committed; automatic process reattachment after app restart still pending; inspected format list and validated exact format ID selection added provisionally (Ubuntu verification pending)
-- [ ] RSS/Atom/JSON feeds: manual feed inspection, enclosure selection and queueing committed (new CI and Ubuntu verification pending); persistent subscriptions, periodic polling, filters and automatic duplicate-safe downloading remain pending
+- [ ] RSS/Atom/JSON feeds: manual feed inspection, enclosure selection and queueing plus saved subscriptions with opt-in 15-minute auto-enclosure queueing and dedupe code committed (CI/Ubuntu verification pending); advanced filter rules, background execution while app is closed, and rigorous adversarial network testing remain pending
 - [ ] HTTP link grabber and downloadable asset discovery
 - [ ] Cloud/service integrations and optional accounts where feasible
 
