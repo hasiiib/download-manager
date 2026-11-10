@@ -411,3 +411,13 @@ Pause, Resume and Cancel now check each transfer's current aria2 `tellStatus` va
 **Move to top/bottom** now verifies that the transfer is actually `waiting` in aria2. Successful queue actions are reported as changes to aria2 queue position; a separate future change is needed to display aria2's full queue order instead of the current history ordering. Transfer-control feedback and errors now appear beside the download rows, instead of only in the new-download form at the top of the page.
 
 These changes do not introduce new background polling or additional dependencies. Close the installed app and use `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, QA-test, build, verify and reinstall in one command. Real pause/resume, queue and restart behavior still need to be tested on Ubuntu with a slow, resumable download.
+
+## Offline reliability work before the next Ubuntu test (November 2026)
+
+While desktop access is unavailable, history operations were hardened without changing the application dependencies or adding background polling:
+
+- **Forget from history** is now transactional: the app validates the entry, persists a cloned history snapshot with the entry removed, and only then swaps the live in-memory map. If saving fails (for example due to an unwritable directory or full disk), the download remains in the UI and in the previous history file rather than disappearing until restart.
+- **Concurrent UI polling** now remembers which GIDs were present when the poll began. If Forget or Retry removes one while aria2 is replying, an old result cannot add the removed GID back into persisted history. Newly discovered child GIDs for magnet/torrent metadata are still eligible for insertion.
+- Rust regression tests cover a simulated failed write, active/paused removal rejection, successful history removal, and the distinction between stale and newly discovered GIDs.
+
+The Ubuntu test suite previously passed before these changes, but **the new Rust code has not yet been compiled or run on Ubuntu**. When a laptop is available, close the app and use the existing one-command `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, run QA, build/verify the Debian package, reinstall, and launch. Then verify Forget from history and Retry alongside normal download flows.
