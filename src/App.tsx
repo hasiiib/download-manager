@@ -743,11 +743,11 @@ export default function App() {
             </>}
             {settingsTab === "connection" && <>
               <h3>Connection & speed</h3><p>These settings control the aria2 download engine.</p>
-              <label><span>Connections per server</span><input type="number" min="1" max="32" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
+              <label><span>Requested parallel segments (1–32)</span><input type="number" min="1" max="32" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
               <label><span>Minimum segment size (MiB)</span><input type="number" min="1" max="64" value={draft.minSplitSizeMib} onChange={e => setDraft(s => ({ ...s, minSplitSizeMib: Number(e.target.value) }))}/></label>
               <label><span>Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
               <label><span>Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" max="1048576" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
-              <p className="settings-note">Connection count and segment size apply to newly queued downloads. Smaller segments can improve parallel downloads on range-capable servers, but may increase overhead. Speed depends on the host and network.</p>
+              <p className="settings-note">Allows up to 32 requested segments per download. Stock aria2 caps connections to a single server at 16, so 32 segments do not guarantee 32 same-server connections. Settings affect newly queued downloads; results depend on HTTP range support and server limits.</p>
             </>}
             {settingsTab === "save" && <>
               <h3>Save To</h3><p>Choose where new downloads are stored.</p>
