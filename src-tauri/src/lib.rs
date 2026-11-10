@@ -2,7 +2,7 @@ use base64::Engine as _;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, fs, io::Write, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::{Arc, Mutex}, time::{Duration, Instant}};
+use std::{collections::BTreeMap, fs, io::{BufRead, BufReader, Write}, net::TcpListener, path::PathBuf, process::{Child, Command, Stdio}, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{Duration, Instant}};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use tauri::State;
@@ -113,6 +113,9 @@ struct MediaJob {
     status: String,
     format: String,
     error: Option<String>,
+    progress: Option<f32>,
+    speed: String,
+    eta: String,
 }
 
 #[derive(Serialize)]
@@ -157,6 +160,7 @@ struct Engine {
     settings: Mutex<Settings>,
     schedule: Mutex<Schedule>,
     media_jobs: Arc<Mutex<BTreeMap<String, MediaJob>>>,
+    media_cancellations: Arc<Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
     data_dir: PathBuf,
     last_history_save: Mutex<Instant>,
 }
@@ -377,7 +381,7 @@ impl Engine {
             client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
-            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
+            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(BTreeMap::new())), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
             last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
@@ -1067,6 +1071,26 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
     result
 }
 
+// yt-dlp's dedicated progress template is intentionally narrow; no terminal
+// escapes, arbitrary log text, or unbounded captured output is kept in memory.
+fn parse_media_progress(line: &str) -> Option<(f32, String, String)> {
+    let raw = line.trim().strip_prefix("DM_PROGRESS:")?;
+    let mut parts = raw.splitn(3, '|');
+    let percent = parts.next()?.trim().trim_end_matches('%').trim().parse::<f32>().ok()?;
+    if !percent.is_finite() || !(0.0..=100.0).contains(&percent) { return None; }
+    let speed = parts.next()?.trim().chars().take(40).collect();
+    let eta = parts.next()?.trim().chars().take(40).collect();
+    Some((percent, speed, eta))
+}
+
+#[tauri::command]
+fn cancel_media_download(engine: State<'_, Engine>, id: String) -> Result<(), String> {
+    let cancellations = engine.media_cancellations.lock().map_err(|error| error.to_string())?;
+    let cancel = cancellations.get(&id).ok_or("Media job is no longer running")?;
+    cancel.store(true, Ordering::Release);
+    Ok(())
+}
+
 #[tauri::command]
 fn start_media_download(engine: State<'_, Engine>, source: String, format: String) -> Result<MediaJob, String> {
     media_http_url(&source)?;
@@ -1074,38 +1098,83 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
     let mut command = Command::new("yt-dlp");
-    command.args(["--ignore-config", "--no-playlist", "--no-progress", "--no-overwrites", "--restrict-filenames"]);
+    command.args(["--ignore-config", "--no-playlist", "--newline", "--no-color", "--no-overwrites", "--restrict-filenames"]);
+    command.args(["--progress-template", "download:DM_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s"]);
     command.args(args);
     command.arg("-P").arg(&output_folder);
     command.arg("--").arg(&source);
-    let child = command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn().map_err(|_| "yt-dlp is missing or could not launch. Install yt-dlp and FFmpeg to enable media downloads.".to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let job = MediaJob {
         id: id.clone(), title: source, status: "downloading".into(),
-        format, error: None,
+        format, error: None, progress: None, speed: String::new(), eta: String::new(),
     };
     engine.media_jobs.lock().map_err(|error| error.to_string())?
         .insert(id.clone(), job.clone());
+    let stop = Arc::new(AtomicBool::new(false));
+    engine.media_cancellations.lock().map_err(|error| error.to_string())?
+        .insert(id.clone(), Arc::clone(&stop));
     let jobs = Arc::clone(&engine.media_jobs);
-    std::thread::spawn(move || {
-        let mut child = child;
-        let result = child.wait();
-        if let Ok(mut entries) = jobs.lock() {
-            if let Some(entry) = entries.get_mut(&id) {
-                match result {
-                    Ok(status) if status.success() => entry.status = "complete".into(),
-                    Ok(status) => {
-                        entry.status = "error".into();
-                        entry.error = Some(format!("yt-dlp exited with {status}. Check whether FFmpeg is installed or the source is supported."));
-                    }
-                    Err(error) => {
-                        entry.status = "error".into();
-                        entry.error = Some(format!("Cannot wait for yt-dlp: {error}"));
+    let cancellations = Arc::clone(&engine.media_cancellations);
+    let reader_jobs = Arc::clone(&jobs);
+    let reader_id = id.clone();
+    let progress_reader = child.stdout.take().map(|output| std::thread::spawn(move || {
+        for line in BufReader::new(output).lines() {
+            let Ok(line) = line else { break };
+            if let Some((progress, speed, eta)) = parse_media_progress(&line) {
+                if let Ok(mut entries) = reader_jobs.lock() {
+                    if let Some(entry) = entries.get_mut(&reader_id) {
+                        if entry.status == "downloading" {
+                            entry.progress = Some(progress);
+                            entry.speed = speed;
+                            entry.eta = eta;
+                        }
                     }
                 }
             }
         }
+    }));
+    std::thread::spawn(move || {
+        let (result, cancelled) = loop {
+            if stop.load(Ordering::Acquire) {
+                let _ = child.kill();
+                break (child.wait(), true);
+            }
+            match child.try_wait() {
+                Ok(Some(status)) => break (Ok(status), false),
+                Ok(None) => std::thread::sleep(Duration::from_millis(200)),
+                Err(error) => break (Err(error), false),
+            }
+        };
+        if let Some(reader) = progress_reader { let _ = reader.join(); }
+        if let Ok(mut entries) = jobs.lock() {
+            if let Some(entry) = entries.get_mut(&id) {
+                if cancelled {
+                    entry.status = "cancelled".into();
+                    entry.speed.clear();
+                    entry.eta.clear();
+                } else {
+                    match result {
+                        Ok(status) if status.success() => {
+                            entry.status = "complete".into();
+                            entry.progress = Some(100.0);
+                            entry.speed.clear();
+                            entry.eta.clear();
+                        }
+                        Ok(status) => {
+                            entry.status = "error".into();
+                            entry.error = Some(format!("yt-dlp exited with {status}. Check whether FFmpeg is installed or the source is supported."));
+                        }
+                        Err(error) => {
+                            entry.status = "error".into();
+                            entry.error = Some(format!("Cannot wait for yt-dlp: {error}"));
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(mut entries) = cancellations.lock() { entries.remove(&id); }
     });
     Ok(job)
 }
@@ -1595,6 +1664,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_only_bounded_media_progress_lines() {
+        let (percentage, speed, eta) = parse_media_progress("DM_PROGRESS: 42.5%|2.3MiB/s|00:12").unwrap();
+        assert_eq!(percentage, 42.5);
+        assert_eq!(speed, "2.3MiB/s");
+        assert_eq!(eta, "00:12");
+        assert!(parse_media_progress("[download] 40%").is_none());
+        assert!(parse_media_progress("DM_PROGRESS:120%|1MiB/s|01:00").is_none());
+        assert!(parse_media_progress("DM_PROGRESS:NaN%|1MiB/s|01:00").is_none());
+        assert!(parse_media_progress("DM_PROGRESS:missing|1MiB/s|01:00").is_none());
+    }
+
+    #[test]
     fn media_helper_rejects_unsafe_sources_and_formats() {
         assert!(media_http_url("https://example.org/watch?v=1").is_ok());
         assert!(media_http_url("http://example.org/video").is_ok());
@@ -1780,7 +1861,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, cancel_media_download, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
