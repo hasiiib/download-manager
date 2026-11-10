@@ -188,8 +188,8 @@ fn media_format_args(format: &str) -> Result<Vec<&'static str>, String> {
         "best" => Ok(vec!["-f", "bv*+ba/b", "--merge-output-format", "mkv"]),
         "mp4" => Ok(vec!["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4"]),
         "audio" => Ok(vec!["-x", "--audio-format", "mp3"]),
-        "720p" => Ok(vec!["-f", "bv*[height<=720]+ba/b[height<=720]/b", "--merge-output-format", "mkv"]),
-        "1080p" => Ok(vec!["-f", "bv*[height<=1080]+ba/b[height<=1080]/b", "--merge-output-format", "mkv"]),
+        "720p" => Ok(vec!["-f", "bv*[height<=720]+ba/b[height<=720]", "--merge-output-format", "mkv"]),
+        "1080p" => Ok(vec!["-f", "bv*[height<=1080]+ba/b[height<=1080]", "--merge-output-format", "mkv"]),
         _ => Err("Select Best, MP4, MP3 audio, 720p or 1080p".into()),
     }
 }
