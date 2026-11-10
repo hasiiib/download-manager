@@ -35,6 +35,7 @@ type Settings = {
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
 type MediaFormat = { id: string; extension: string; resolution: string; note: string; filesize: number | null };
+type FeedSubscription = { id: string; source: string; title: string; autoDownload: boolean; seenSources: string[]; lastCheckedUnix: number; error: string | null };
 type FeedPreview = { title: string; entries: { title: string; source: string; enclosure: boolean }[] };
 type PlaylistPreview = { title: string; entries: { index: number; title: string; durationSeconds: number | null }[] };
 type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string; formats: MediaFormat[] };
@@ -111,6 +112,7 @@ export default function App() {
   const [feedOpen, setFeedOpen] = useState(false);
   const [feedUrl, setFeedUrl] = useState("");
   const [feedPreview, setFeedPreview] = useState<FeedPreview | null>(null);
+  const [feedSubscriptions, setFeedSubscriptions] = useState<FeedSubscription[]>([]);
   const [feedSelection, setFeedSelection] = useState<number[]>([]);
   const [feedBusy, setFeedBusy] = useState(false);
   const [feedError, setFeedError] = useState("");
@@ -384,6 +386,47 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!feedOpen) return;
+    void invoke<FeedSubscription[]>("list_feed_subscriptions")
+      .then(setFeedSubscriptions).catch(() => {});
+  }, [feedOpen]);
+
+  const subscribeFeed = async () => {
+    setFeedBusy(true);
+    setFeedError("");
+    try {
+      const result = await invoke<FeedSubscription>("subscribe_feed", { source: feedUrl.trim() });
+      setFeedSubscriptions(items => [...items, result]);
+      setFeedError("Feed saved. Automatic downloading is off until you enable it below.");
+    } catch (error) { setFeedError(String(error)); }
+    finally { setFeedBusy(false); }
+  };
+
+  const changeFeedAuto = async (id: string, enabled: boolean) => {
+    setFeedBusy(true);
+    setFeedError("");
+    try {
+      await invoke("set_feed_auto_download", { id, enabled });
+      setFeedSubscriptions(items => items.map(item =>
+        item.id === id ? { ...item, autoDownload: enabled } : item));
+      setFeedError(enabled ? "Automatic enclosure downloads enabled. Checks run roughly every 15 minutes while the app is open." :
+        "Automatic enclosure downloads disabled.");
+    } catch (error) { setFeedError(String(error)); }
+    finally { setFeedBusy(false); }
+  };
+
+  const removeFeedSubscription = async (id: string) => {
+    setFeedBusy(true);
+    setFeedError("");
+    try {
+      await invoke("remove_feed_subscription", { id });
+      setFeedSubscriptions(items => items.filter(item => item.id !== id));
+      setFeedError("Feed subscription removed. Downloaded files were not deleted.");
+    } catch (error) { setFeedError(String(error)); }
+    finally { setFeedBusy(false); }
+  };
+
   const inspectFeed = async () => {
     setFeedBusy(true);
     setFeedError("");
@@ -605,10 +648,11 @@ export default function App() {
         <div className="modal-title"><div><Link2 size={22}/><h2>RSS / Atom feeds</h2></div><button aria-label="Close RSS inspector" onClick={() => setFeedOpen(false)}><X size={18}/></button></div>
         <p>Inspect an RSS, Atom or JSON feed and select links to add to the aria2 queue. Enclosures are preferred. Article links may download an HTML page rather than a media file.</p>
         <label><span>Public HTTP/HTTPS feed URL</span><input type="url" value={feedUrl} onChange={event => { setFeedUrl(event.target.value); setFeedPreview(null); setFeedSelection([]); }} placeholder="https://example.org/feed.xml"/></label>
-        <div className="media-actions"><button type="button" disabled={feedBusy || !feedUrl.trim()} onClick={() => void inspectFeed()}>{feedBusy ? "Checking..." : "Inspect feed"}</button></div>
+        <div className="media-actions"><button type="button" disabled={feedBusy || !feedUrl.trim()} onClick={() => void subscribeFeed()}>Save subscription</button><button type="button" disabled={feedBusy || !feedUrl.trim()} onClick={() => void inspectFeed()}>{feedBusy ? "Checking..." : "Inspect feed"}</button></div>
         {feedPreview && <div className="playlist-inspection"><strong>{feedPreview.title} · {feedSelection.length} selected</strong><div className="playlist-select-actions"><button type="button" onClick={() => setFeedSelection(feedPreview.entries.map((_, i) => i))}>Select all</button><button type="button" onClick={() => setFeedSelection([])}>Select none</button><button type="button" onClick={() => setFeedSelection(feedPreview.entries.map((entry, i) => entry.enclosure ? i : -1).filter(i => i >= 0))}>Enclosures only</button></div>
           <div className="playlist-inspection-rows">{feedPreview.entries.map((entry, i) => <label key={i}><input type="checkbox" checked={feedSelection.includes(i)} onChange={event => setFeedSelection(indices => event.target.checked ? [...indices, i] : indices.filter(n => n !== i))}/><span>{entry.enclosure ? "📎 " : "🔗 "}{entry.title}<small className="feed-entry-source">{entry.source}</small></span></label>)}</div>
         </div>}
+        {feedSubscriptions.length > 0 && <div className="feed-subscriptions"><h3>Saved feeds</h3><p>Auto-download is off by default. Enabling it queues new enclosure files when the app is running; existing entries are marked seen when you subscribe.</p>{feedSubscriptions.map(item => <div key={item.id} className="feed-subscription"><div><strong>{item.title}</strong><small title={item.source}>{item.source}</small>{item.error && <small className="error">{item.error}</small>}</div><label><input type="checkbox" disabled={feedBusy} checked={item.autoDownload} onChange={event => void changeFeedAuto(item.id, event.target.checked)}/>Auto</label><button type="button" disabled={feedBusy} onClick={() => void removeFeedSubscription(item.id)}>Remove</button></div>)}</div>}
         {feedError && <p className="settings-note" role="status">{feedError}</p>}
         <div className="modal-actions"><button type="button" onClick={() => setFeedOpen(false)}>Close</button><button type="button" disabled={feedBusy || !feedPreview || feedSelection.length === 0} onClick={() => void addFeedEntries()}>{feedBusy ? "Queueing..." : "Queue selected links"}</button></div>
       </section>
