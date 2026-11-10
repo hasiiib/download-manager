@@ -166,3 +166,21 @@
 .schedule-modal .schedule-warning{border:1px solid #91684b;background:#382a24;color:#ffe0b5;border-radius:10px;padding:12px 14px;font-size:12px;line-height:1.6}
 .schedule-modal .settings-note{font-size:11px;color:#b9bad6}
 @media(max-width:950px){.schedule-banner{align-items:flex-start;flex-wrap:wrap}}
+
+/* Optional yt-dlp video/audio download dialog. */
+.media-modal{width:min(660px,100%);max-height:90vh;overflow-y:auto}
+.media-modal input[type=url],.media-modal select{width:100%;border:1px solid #384361;border-radius:9px;padding:12px;background:#101729;color:#ecedff;color-scheme:dark}
+.media-modal select option{background:#101729;color:#ecedff}
+.media-actions{display:flex;justify-content:flex-end;margin:-6px 0 16px}
+.media-actions button{border:1px solid #554b7a;border-radius:9px;padding:10px 13px;background:#2a2550;color:#ded4ff;font-size:12px;font-weight:700;cursor:pointer}
+.media-actions button:disabled{opacity:.5;cursor:wait}
+.media-preview{display:flex;flex-direction:column;gap:6px;border:1px solid #393f5d;background:#161e32;border-radius:11px;padding:13px;margin-bottom:15px}
+.media-preview strong{font-size:13px;color:#f1eeff;overflow-wrap:anywhere}
+.media-preview small{font-size:11px;color:#a2afc9}
+.media-job-list{display:flex;flex-direction:column;gap:5px;max-height:160px;overflow:auto;margin:13px 0;border:1px solid #36405e;border-radius:9px;padding:8px}
+.media-job-list>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;padding:9px 8px;border-bottom:1px solid #313b54}
+.media-job-list>div:last-child{border-bottom:0}
+.media-job-list span{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#cad4ec}
+.media-job-list strong{font-size:11px;color:#a6e0bf}
+.media-job-list .media-job-error{color:#ff93aa}
+.media-job-list small{grid-column:1/-1;color:#ff9eaf;font-size:10px}
