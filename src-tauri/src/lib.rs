@@ -1330,7 +1330,10 @@ fn parsed_feed(bytes: &[u8]) -> Result<FeedPreview, String> {
     let feed = feed_rs::parser::parse(bytes)
         .map_err(|error| format!("Invalid RSS/Atom/JSON feed: {error}"))?;
     let entries = feed.entries.iter().take(50).filter_map(|entry| {
-        let attachment = entry.links.iter().find(|link| link.rel.as_deref() == Some("enclosure"));
+        let attachment = entry.links.iter().find(|link| link.rel.as_deref() == Some("enclosure"))
+            // feed-rs normalizes RSS 2 <enclosure> into Content.src,
+            // whereas Atom enclosure links may appear in Entry.links.
+            .or_else(|| entry.content.as_ref().and_then(|content| content.src.as_ref()));
         let link = attachment.or_else(|| entry.links.iter().find(|link| link.rel.as_deref() == Some("alternate")))
             .or_else(|| entry.links.first())?;
         // Enclosure or article links must be explicit HTTP(S); never allow
