@@ -1258,6 +1258,114 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
 
 // yt-dlp's dedicated progress template is intentionally narrow; no terminal
 // escapes, arbitrary log text, or unbounded captured output is kept in memory.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeedPreview {
+    title: String,
+    entries: Vec<FeedEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FeedEntry {
+    title: String,
+    source: String,
+    enclosure: bool,
+}
+
+fn public_feed_ipv4(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    !(a == 0 || a == 10 || a == 127 || a >= 224 ||
+        a == 169 && b == 254 || a == 172 && (16..=31).contains(&b) ||
+        a == 192 && b == 168 || a == 100 && (64..=127).contains(&b) ||
+        a == 198 && (b == 18 || b == 19 || b == 51 && c == 100) ||
+        a == 192 && (b == 0 || b == 88 && c == 99 || b == 0 && c == 2) ||
+        a == 203 && b == 0 && c == 113)
+}
+
+fn validated_feed_url(value: &str) -> Result<(url::Url, String, u16), String> {
+    if value.len() > 2048 || value.chars().any(|ch| ch.is_control()) {
+        return Err("Invalid feed URL".into());
+    }
+    let url = url::Url::parse(value).map_err(|_| "Enter a complete RSS/Atom feed URL")?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return Err("Feed must use HTTPS or HTTP".into());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("Feed URLs must not contain credentials".into());
+    }
+    let host = url.host_str().ok_or("Feed URL must have a hostname")?.to_string();
+    if host.eq_ignore_ascii_case("localhost") || host.ends_with(".localhost") ||
+        host.ends_with(".local") || host.ends_with(".internal") || host.ends_with(".test") {
+        return Err("Local/private network feeds are not supported".into());
+    }
+    let port = url.port_or_known_default().ok_or("Invalid feed port")?;
+    if (url.scheme() == "https" && port != 443) || (url.scheme() == "http" && port != 80) {
+        return Err("Only standard HTTP/HTTPS feed ports are supported".into());
+    }
+    Ok((url, host, port))
+}
+
+fn parsed_feed(bytes: &[u8]) -> Result<FeedPreview, String> {
+    let feed = feed_rs::parser::parse(bytes)
+        .map_err(|error| format!("Invalid RSS/Atom/JSON feed: {error}"))?;
+    let entries = feed.entries.iter().take(50).filter_map(|entry| {
+        let attachment = entry.links.iter().find(|link| link.rel == "enclosure");
+        let link = attachment.or_else(|| entry.links.iter().find(|link| link.rel == "alternate"))
+            .or_else(|| entry.links.first())?;
+        // Enclosure or article links must be explicit HTTP(S); never allow
+        // file://, javascript: or other schemes from untrusted feed content.
+        media_http_url(&link.href).ok()?;
+        Some(FeedEntry {
+            title: entry.title.as_ref().map(|title| title.content.as_str())
+                .unwrap_or("Untitled entry").chars().filter(|ch| !ch.is_control()).take(160).collect(),
+            source: link.href.clone(), enclosure: attachment.is_some(),
+        })
+    }).collect();
+    Ok(FeedPreview {
+        title: feed.title.map(|title| title.content.chars().filter(|ch| !ch.is_control()).take(160).collect())
+            .unwrap_or_else(|| "RSS feed".into()),
+        entries,
+    })
+}
+
+#[tauri::command]
+async fn inspect_feed(source: String) -> Result<FeedPreview, String> {
+    let (url, host, port) = validated_feed_url(&source)?;
+    // Resolve before connecting and pin to a vetted public IPv4 address.
+    // Redirects and inherited proxy settings are disabled to prevent fetching
+    // another target, including loopback and other private services.
+    let addr = tokio::task::spawn_blocking(move || {
+        use std::net::ToSocketAddrs;
+        (host.as_str(), port).to_socket_addrs()
+            .map_err(|error| format!("Cannot resolve feed host: {error}"))?
+            .find(|address| match address.ip() {
+                std::net::IpAddr::V4(ip) => public_feed_ipv4(ip),
+                std::net::IpAddr::V6(_) => false,
+            }).ok_or_else(|| "Feed hostname has no permitted public IPv4 address".to_string())
+    }).await.map_err(|error| error.to_string())??;
+    let host = url.host_str().ok_or("Invalid feed host")?;
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve(host, addr)
+        .timeout(Duration::from_secs(15))
+        .build().map_err(|error| error.to_string())?;
+    let mut response = client.get(url)
+        .send().await.map_err(|error| format!("Feed request failed: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("Feed request returned HTTP {}", response.status()));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+        if body.len() + chunk.len() > 1_048_576 {
+            return Err("Feed exceeds 1 MiB limit".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    parsed_feed(&body)
+}
+
 fn playlist_overall_progress(selected: &[u32], index: Option<u32>, percent: f32) -> Option<f32> {
     let index = index?;
     if selected.is_empty() || !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
@@ -1988,6 +2096,26 @@ mod tests {
     }
 
     #[test]
+    fn rss_parser_exposes_enclosures_and_blocks_private_feeds() {
+        let xml = br#"<rss version="2.0"><channel><title>Updates</title>
+            <item><title>File 1</title><enclosure url="https://example.org/file.zip" type="application/zip" /></item>
+            <item><title>Web link</title><link>https://example.org/post</link></item>
+            </channel></rss>"#;
+        let feed = parsed_feed(xml).unwrap();
+        assert_eq!(feed.title, "Updates");
+        assert_eq!(feed.entries.len(), 2);
+        assert!(feed.entries[0].enclosure);
+        assert!(!feed.entries[1].enclosure);
+        assert!(validated_feed_url("https://example.org/feed").is_ok());
+        assert!(validated_feed_url("http://localhost/feed").is_err());
+        assert!(validated_feed_url("file:///etc/passwd").is_err());
+        assert!(validated_feed_url("https://example.org:8080/feed").is_err());
+        assert!(!public_feed_ipv4(std::net::Ipv4Addr::new(127, 0, 0, 1)));
+        assert!(!public_feed_ipv4(std::net::Ipv4Addr::new(192, 168, 1, 2)));
+        assert!(public_feed_ipv4(std::net::Ipv4Addr::new(1, 1, 1, 1)));
+    }
+
+    #[test]
     fn playlist_selection_has_unique_bounded_one_based_indexes() {
         assert!(validate_playlist_items(&[], false).is_ok());
         assert!(validate_playlist_items(&[1, 3, 50], true).is_ok());
@@ -2252,7 +2380,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
