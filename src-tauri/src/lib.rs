@@ -727,6 +727,54 @@ async fn control_download(engine: State<'_, Engine>, gid: String, action: String
 }
 
 
+fn bulk_control_method(action: &str) -> Result<&'static str, String> {
+    match action {
+        "pause" => Ok("pauseAll"),
+        "resume" => Ok("unpauseAll"),
+        _ => Err("Unsupported bulk action".into()),
+    }
+}
+
+fn apply_bulk_status(entries: &mut BTreeMap<String, Download>, action: &str) -> usize {
+    let mut changed = 0;
+    for entry in entries.values_mut() {
+        let should_change = match action {
+            "pause" => matches!(entry.status.as_str(), "active" | "waiting"),
+            "resume" => entry.status == "paused",
+            _ => false,
+        };
+        if should_change {
+            entry.status = if action == "pause" { "paused" } else { "waiting" }.into();
+            entry.download_speed = 0;
+            entry.upload_speed = 0;
+            changed += 1;
+        }
+    }
+    changed
+}
+
+#[tauri::command]
+async fn control_all_downloads(engine: State<'_, Engine>, action: String) -> Result<usize, String> {
+    // This process launches and owns its own private aria2 instance; global
+    // pause/unpause therefore cannot interfere with another app's downloads.
+    let method = bulk_control_method(&action)?;
+    engine.rpc(method, vec![]).await?;
+    let changed = {
+        let mut entries = engine.downloads.lock().map_err(|error| error.to_string())?;
+        let changed = apply_bulk_status(&mut entries, &action);
+        if changed > 0 {
+            if let Err(error) = save_json(&engine.data_dir.join("downloads.json"), &*entries) {
+                eprintln!("Bulk control succeeded but history checkpoint failed: {error}");
+            }
+        }
+        changed
+    };
+    if let Err(error) = engine.rpc("saveSession", vec![]).await {
+        eprintln!("Unable to checkpoint aria2 session after bulk control: {error}");
+    }
+    Ok(changed)
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TorrentFile {
@@ -1194,6 +1242,35 @@ mod tests {
     }
 
     #[test]
+    fn bulk_pause_resume_updates_only_eligible_history() {
+        let make = |gid: &str, status: &str| Download {
+            gid: gid.into(), source: "https://example.org/file".into(),
+            is_torrent: false, name: gid.into(), status: status.into(),
+            completed_length: 0, total_length: 10, download_speed: 120,
+            upload_speed: 0, path: String::new(), error: None,
+        };
+        let mut entries = BTreeMap::from([
+            ("active".into(), make("active", "active")),
+            ("waiting".into(), make("waiting", "waiting")),
+            ("paused".into(), make("paused", "paused")),
+            ("done".into(), make("done", "complete")),
+            ("recovering".into(), make("recovering", "recovering")),
+        ]);
+        assert_eq!(bulk_control_method("pause").unwrap(), "pauseAll");
+        assert_eq!(bulk_control_method("resume").unwrap(), "unpauseAll");
+        assert!(bulk_control_method("cancel").is_err());
+        assert_eq!(apply_bulk_status(&mut entries, "pause"), 2);
+        assert_eq!(entries["active"].status, "paused");
+        assert_eq!(entries["active"].download_speed, 0);
+        assert_eq!(entries["done"].status, "complete");
+        assert_eq!(entries["recovering"].status, "recovering");
+        assert_eq!(apply_bulk_status(&mut entries, "resume"), 3);
+        assert_eq!(entries["waiting"].status, "waiting");
+        assert_eq!(entries["done"].status, "complete");
+        assert_eq!(apply_bulk_status(&mut entries, "unknown"), 0);
+    }
+
+    #[test]
     fn transfer_controls_reject_stale_or_invalid_states() {
         assert_eq!(control_method("pause", "active").unwrap(), "pause");
         assert_eq!(control_method("pause", "waiting").unwrap(), "pause");
@@ -1296,7 +1373,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
