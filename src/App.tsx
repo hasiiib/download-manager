@@ -24,6 +24,7 @@ type TorrentFile = { index: number; path: string; length: number; completedLengt
 type TorrentInfo = { peers: number; trackers: string[] };
 type Settings = {
   connections: number;
+  minSplitSizeMib: number;
   concurrent: number;
   speedLimitKib: number;
   seedMinutes: number;
@@ -58,7 +59,7 @@ const viewDescriptions: Record<Filter, string> = {
   torrent: "Your magnet and BitTorrent downloads.",
 };
 type SettingsTab = "general" | "connection" | "save" | "downloads" | "integration" | "privacy";
-const defaults: Settings = { connections: 8, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
+const defaults: Settings = { connections: 8, minSplitSizeMib: 4, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
 const formatEta = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return "Calculating...";
@@ -346,7 +347,7 @@ export default function App() {
     setWorking(true);
     setSettingsError("");
     try {
-      await invoke("save_settings", { settings: { ...draft, connections: Number(draft.connections), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib), seedMinutes: Number(draft.seedMinutes) } });
+      await invoke("save_settings", { settings: { ...draft, connections: Number(draft.connections), minSplitSizeMib: Number(draft.minSplitSizeMib), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib), seedMinutes: Number(draft.seedMinutes) } });
       setSettings(draft); setSettingsOpen(false);
     } catch (err) { setSettingsError(String(err)); }
     finally { setWorking(false); }
@@ -505,9 +506,10 @@ export default function App() {
             {settingsTab === "connection" && <>
               <h3>Connection & speed</h3><p>These settings control the aria2 download engine.</p>
               <label><span>Connections per server</span><input type="number" min="1" max="16" value={draft.connections} onChange={e => setDraft(s => ({ ...s, connections: Number(e.target.value) }))}/></label>
+              <label><span>Minimum segment size (MiB)</span><input type="number" min="1" max="64" value={draft.minSplitSizeMib} onChange={e => setDraft(s => ({ ...s, minSplitSizeMib: Number(e.target.value) }))}/></label>
               <label><span>Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
               <label><span>Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" max="1048576" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
-              <p className="settings-note">The connection-per-server limit applies to newly queued downloads; the overall rate and concurrent limit update immediately.</p>
+              <p className="settings-note">Connection count and segment size apply to newly queued downloads. Smaller segments can improve parallel downloads on range-capable servers, but may increase overhead. Speed depends on the host and network.</p>
             </>}
             {settingsTab === "save" && <>
               <h3>Save To</h3><p>Choose where new downloads are stored.</p>
