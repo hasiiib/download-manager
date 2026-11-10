@@ -1047,11 +1047,11 @@ mod tests {
         sort_by_waiting_queue(&mut items, &json!([
             {"gid":"first"}, {"gid":"later"},
         ]));
-        let order: Vec<_> = items.iter().map(|item| item.gid.as_str()).collect();
+        let order: Vec<_> = items.iter().map(|item| item.gid.clone()).collect();
         assert_eq!(order, vec!["first", "later", "done", "active"]);
         // Invalid or unavailable queue responses leave ordering untouched.
         sort_by_waiting_queue(&mut items, &Value::Null);
-        let unchanged: Vec<_> = items.iter().map(|item| item.gid.as_str()).collect();
+        let unchanged: Vec<_> = items.iter().map(|item| item.gid.clone()).collect();
         assert_eq!(unchanged, order);
     }
 
