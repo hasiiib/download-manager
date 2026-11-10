@@ -184,7 +184,7 @@ fn media_formats(info: &Value) -> Vec<MediaFormat> {
     let Some(formats) = info.get("formats").and_then(Value::as_array) else { return vec![] };
     formats.iter().filter_map(|entry| {
         let id = entry.get("format_id")?.as_str()?;
-        if id.is_empty() || id.len() > 64 ||
+        if id.is_empty() || id.len() > 64 || !id.starts_with(|c: char| c.is_ascii_alphanumeric()) ||
             !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
             return None;
         }
@@ -235,7 +235,7 @@ fn media_format_args(format: &str) -> Result<Vec<String>, String> {
     // Format IDs come from yt-dlp metadata. Permit only narrow identifiers;
     // never allow arbitrary selectors/command arguments from the frontend.
     if let Some(id) = format.strip_prefix("id:") {
-        if !id.is_empty() && id.len() <= 64 &&
+        if !id.is_empty() && id.len() <= 64 && id.starts_with(|ch: char| ch.is_ascii_alphanumeric()) &&
             id.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')) {
             return Ok(vec!["-f".into(), id.to_string()]);
         }
