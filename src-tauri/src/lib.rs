@@ -41,6 +41,7 @@ struct Settings {
     low_memory_mode: bool,
 }
 
+fn aria2_server_connections(requested: u8) -> u8 { requested.min(16) }
 fn default_min_split_size_mib() -> u8 { 4 }
 fn default_refresh_seconds() -> u8 { 3 }
 fn default_low_memory_mode() -> bool { true }
@@ -536,7 +537,7 @@ impl Engine {
             .arg(format!("--dir={}", settings.download_dir))
             .arg(format!("--split={}", settings.connections))
             .arg(format!("--min-split-size={}M", settings.min_split_size_mib))
-            .arg(format!("--max-connection-per-server={}", settings.connections))
+            .arg(format!("--max-connection-per-server={}", aria2_server_connections(settings.connections)))
             .arg(format!("--max-concurrent-downloads={}", settings.concurrent))
             .arg(format!("--max-overall-download-limit={}K", settings.speed_limit_kib))
             .arg("--bt-save-metadata=true")
@@ -693,7 +694,7 @@ async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
     let mut opts = json!({
         "dir": settings.download_dir,
         "split": settings.connections.to_string(),
-        "max-connection-per-server": settings.connections.to_string(),
+        "max-connection-per-server": aria2_server_connections(settings.connections).to_string(),
         "min-split-size": format!("{}M", settings.min_split_size_mib),
         "continue": "true",
     });
@@ -2337,6 +2338,13 @@ mod tests {
         assert!(media_format_args("id:--exec").is_err());
         assert!(media_format_args("id:").is_err());
         assert!(media_format_args("--exec").is_err());
+    }
+
+    #[test]
+    fn standard_aria2_server_connection_limit_does_not_break_startup() {
+        assert_eq!(aria2_server_connections(1), 1);
+        assert_eq!(aria2_server_connections(16), 16);
+        assert_eq!(aria2_server_connections(32), 16);
     }
 
     #[test]
