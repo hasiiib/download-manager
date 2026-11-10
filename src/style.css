@@ -205,3 +205,16 @@
 /* Inspected yt-dlp media format information. */
 .media-format-note{font-size:11px;line-height:1.55;color:#a9b9d6;margin:3px 0 13px}
 .media-modal select optgroup{background:#131a2e;color:#bcb4f0}
+
+/* Select individual items from an inspected yt-dlp playlist. */
+.media-playlist-selection{margin:4px 0 16px;border:1px solid #37415f;border-radius:10px;padding:12px;background:#171d32}
+.media-playlist-selection>small{display:block;color:#a8b8d6;font-size:11px;line-height:1.5;margin-top:9px}
+.playlist-inspection{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.playlist-inspection>strong{font-size:12px;color:#d2dcf5;overflow-wrap:anywhere}
+.playlist-select-actions{display:flex;gap:8px}
+.playlist-select-actions button{border:1px solid #49436e;border-radius:7px;padding:7px 10px;background:#27243e;color:#d2c7ff;font-size:11px;cursor:pointer}
+.playlist-inspection-rows{display:flex;flex-direction:column;max-height:210px;overflow-y:auto;gap:4px}
+.playlist-inspection-rows label{display:flex;flex-direction:row;align-items:center;gap:10px;padding:7px 8px;border-radius:6px;color:#d9e2f4;font-size:11px}
+.playlist-inspection-rows label:hover{background:#29314b}
+.playlist-inspection-rows input{width:15px;height:15px;flex:none;accent-color:#9d85ed}
+.playlist-inspection-rows span{flex:1;overflow-wrap:anywhere}
