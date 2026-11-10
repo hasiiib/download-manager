@@ -33,6 +33,16 @@ type Settings = {
 };
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
+type Schedule = {
+  state: "idle" | "armed" | "running" | "power_pending" | "completed" | "cancelled" | "error";
+  startAtUnix: number;
+  concurrent: number;
+  afterComplete: "none" | "shutdown" | "sleep";
+  gids: string[];
+  powerAtUnix: number;
+  message: string;
+};
+
 const viewTitles: Record<Filter, string> = {
   all: "All downloads",
   active: "In progress",
@@ -86,6 +96,13 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaults);
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [schedule, setSchedule] = useState<Schedule | null>(null);
+  const [scheduleStart, setScheduleStart] = useState("");
+  const [scheduleConcurrency, setScheduleConcurrency] = useState(3);
+  const [scheduleAction, setScheduleAction] = useState<Schedule["afterComplete"]>("none");
+  const [scheduleError, setScheduleError] = useState("");
+
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [torrentDialog, setTorrentDialog] = useState<DownloadItem | null>(null);
   const [torrentFiles, setTorrentFiles] = useState<TorrentFile[]>([]);
@@ -114,6 +131,7 @@ export default function App() {
     try {
       const list = await invoke<DownloadItem[]>("list_downloads");
       setItems(list);
+      void invoke<Schedule>("get_schedule").then(setSchedule).catch(() => {});
       setRefreshError("");
     } catch (err) {
       setRefreshError(String(err));
@@ -287,6 +305,43 @@ export default function App() {
     }
   };
 
+  const armSchedule = async () => {
+    const start = new Date(scheduleStart).getTime();
+    if (!Number.isFinite(start) || start <= Date.now()) {
+      setScheduleError("Choose a future local date and time.");
+      return;
+    }
+    setWorking(true);
+    setScheduleError("");
+    try {
+      const result = await invoke<Schedule>("arm_schedule", {
+        startAtUnix: Math.floor(start / 1000),
+        concurrent: scheduleConcurrency,
+        afterComplete: scheduleAction,
+      });
+      setSchedule(result);
+      setScheduleOpen(false);
+      await refresh();
+      setActionFeedback("Schedule armed. Transfers are paused until the selected time.");
+    } catch (error) { setScheduleError(String(error)); }
+    finally { setWorking(false); }
+  };
+
+  const cancelSchedule = async () => {
+    setWorking(true);
+    setScheduleError("");
+    try {
+      const result = await invoke<Schedule>("cancel_schedule");
+      setSchedule(result);
+      setScheduleOpen(false);
+      setActionFeedback("Schedule cancelled. Existing transfers can be resumed manually.");
+      await refresh();
+    } catch (error) {
+      setScheduleError(String(error));
+      setActionFeedback(String(error));
+    } finally { setWorking(false); }
+  };
+
   const save = async () => {
     setWorking(true);
     setSettingsError("");
@@ -362,8 +417,9 @@ export default function App() {
       {!engineOnline && <p className="engine-notice" role="alert">{engineHealth}</p>}
       {message && filter !== "all" && <p className="engine-notice" role="status">{message}</p>}
       {refreshError && filter !== "all" && <p className="engine-notice" role="alert">Engine: {refreshError}</p>}
+      {schedule && ["armed","running","power_pending"].includes(schedule.state) && <div className="schedule-banner" role="status"><div><strong>{schedule.state === "armed" ? "Scheduled" : schedule.state === "running" ? "Schedule running" : "Power action pending"}</strong><span>{schedule.message}</span><small>{schedule.state === "armed" ? "Starts " + new Date(schedule.startAtUnix * 1000).toLocaleString() : schedule.state === "power_pending" ? "Power action at " + new Date(schedule.powerAtUnix * 1000).toLocaleTimeString() : "Monitoring " + schedule.gids.length + " transfers"}</small></div><button type="button" disabled={working} onClick={() => void cancelSchedule()}>Cancel schedule</button></div>}
       {actionFeedback && <div className="action-feedback" role="status"><span>{actionFeedback}</span><button type="button" aria-label="Dismiss notification" onClick={() => setActionFeedback("")}><X size={14}/></button></div>}
-      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools">{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
         {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
           <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
@@ -385,6 +441,19 @@ export default function App() {
       </section>
       <footer><span><SlidersHorizontal size={15}/> Parallel connections, torrents and magnet links powered by aria2.</span><span>LINUX FIRST · CROSS-PLATFORM ROADMAP</span></footer>
     </main>
+    {scheduleOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setScheduleOpen(false); }}>
+      <section className="modal schedule-modal" role="dialog" aria-modal="true" aria-label="Schedule downloads">
+        <div className="modal-title"><div><Clock3 size={22}/><h2>Download scheduler</h2></div><button aria-label="Close scheduler" onClick={() => setScheduleOpen(false)}><X size={18}/></button></div>
+        <p>Schedule the active, queued and paused downloads already in your list. Keep Download Manager running until the jobs complete.</p>
+        <label><span>Start time (your local timezone)</span><input type="datetime-local" value={scheduleStart} onChange={event => setScheduleStart(event.target.value)}/></label>
+        <label><span>Maximum simultaneous downloads</span><input type="number" min="1" max="10" value={scheduleConcurrency} onChange={event => setScheduleConcurrency(Number(event.target.value))}/></label>
+        <label><span>After all scheduled downloads finish successfully</span><select value={scheduleAction} onChange={event => setScheduleAction(event.target.value as Schedule["afterComplete"])}><option value="none">Do nothing</option><option value="shutdown">Shut down computer</option><option value="sleep">Put computer to sleep</option></select></label>
+        {scheduleAction !== "none" && <div className="schedule-warning">This can interrupt unsaved work in other applications. Power action is attempted only if every scheduled transfer completes successfully, with a 60-second cancellation window. Keep the app running. Your desktop may require permission.</div>}
+        {schedule && ["armed","running","power_pending"].includes(schedule.state) && <p className="settings-note">Current: {schedule.message}</p>}
+        {scheduleError && <p className="error" role="alert">{scheduleError}</p>}
+        <div className="modal-actions"><button type="button" onClick={() => setScheduleOpen(false)}>Close</button>{schedule && ["armed","running","power_pending"].includes(schedule.state) ? <button type="button" disabled={working} onClick={() => void cancelSchedule()}>Cancel schedule</button> : <button type="button" disabled={working || !scheduleStart} onClick={() => void armSchedule()}>{working ? "Saving..." : "Arm schedule"}</button>}</div>
+      </section>
+    </div>}
     {confirmClearCompleted && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setConfirmClearCompleted(false); }}>
       <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Clear completed download history" aria-describedby="clear-completed-explanation">
         <div className="modal-title"><div><Trash2 size={21}/><h2>Clear completed history?</h2></div><button aria-label="Close confirmation" type="button" onClick={() => setConfirmClearCompleted(false)}><X size={18}/></button></div>
@@ -448,7 +517,7 @@ export default function App() {
             {settingsTab === "downloads" && <>
               <h3>Downloads & torrents</h3><p>Manage transfer behavior.</p>
               <label><span>Torrent seeding time (minutes, 0 = off)</span><input type="number" min="0" max="65535" value={draft.seedMinutes} onChange={e => setDraft(s => ({ ...s, seedMinutes: Number(e.target.value) }))}/></label>
-              <p className="settings-note">The seeding limit applies to new torrents. Automatic completion actions, download quotas and scheduled queues are planned.</p>
+              <p className="settings-note">The seeding limit applies to new torrents. Use the Scheduler button above the download list to start a queued batch at a chosen time with a concurrency limit and optional completion action. Repeating schedules are planned.</p>
             </>}
             {settingsTab === "integration" && <>
               <h3>Browser integration & file types</h3><p>Planned features, not enabled in this preview.</p>
