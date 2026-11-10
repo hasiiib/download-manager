@@ -501,3 +501,11 @@ When Download Manager exits normally, it signals all app-owned yt-dlp worker thr
 The Video dialog's **Inspect media** action now also reads a bounded list (up to 80 entries) of the format IDs reported by the installed yt-dlp extractor. The format selector shows the format ID, extension, resolution and estimated size when provided. Choosing one uses yt-dlp's exact format ID rather than a generic quality preset. ID characters and length are strictly validated in Rust before being passed to a child process; arbitrary yt-dlp arguments are never accepted. Exact formats may be video-only or audio-only, whereas presets usually select/merge streams as appropriate. This preview represents a single media item, not all items of a playlist.
 
 Frontend and Rust changes are committed but only considered verified once their new GitHub Actions workflow is green and the user has tested real sites on Ubuntu. Per-playlist-item format selection and pause/resume remain pending.
+
+## Media pause/resume and playlist-item progress (November 2026)
+
+The Video dialog now provides **Pause** and **Resume** for active yt-dlp jobs on Unix-based desktops. The app's worker thread signals only the owned yt-dlp process with SIGSTOP and SIGCONT; it checkpoints the state and clears speed/ETA while paused. **Cancel** remains available while paused, including on normal app exit. Paused jobs are marked **Interrupted** after application restart, and the existing Retry action starts a new attempt with retained partial files where yt-dlp supports them. This is process-level pausing, not an independently guaranteed HTTP resume; FFmpeg child processes are not yet managed as a complete process group, so full pause/shutdown behavior still needs live Ubuntu testing.
+
+Playlist downloads now display the active **playlist item number and item ID**, when provided by yt-dlp's progress template. The progress percentage is for the **current item**, not overall playlist completion. Actual playlist length and per-item format selection are still pending. New parser regression tests check valid IDs and bounded playlist indexes.
+
+These changes are code-complete but not verified by an interactive Ubuntu test. GitHub Actions is the first build and unit-test checkpoint. Browser interception remains at the end of the implementation priorities.
