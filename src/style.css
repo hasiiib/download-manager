@@ -137,3 +137,12 @@
 .action-feedback{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;margin:0 0 13px;border:1px solid #404569;border-radius:9px;background:#191d35;color:#d9e2ff;font-size:12px;overflow-wrap:anywhere}
 .action-feedback button{border:0;background:transparent;color:#aeb9d7;display:grid;place-items:center;width:26px;height:26px;flex:none;border-radius:6px;cursor:pointer}
 .action-feedback button:hover{background:#333959;color:#fff}
+
+/* A history-only cleanup action; never delete downloaded files. */
+.clear-completed{display:inline-flex;align-items:center;gap:7px;padding:10px 11px;border:1px solid #694158;border-radius:9px;background:#2a1b2b;color:#ffb0c0;font-size:11px;font-weight:700;white-space:nowrap}
+.clear-completed:hover{background:#432239;border-color:#ac5c76}
+.clear-completed:focus-visible{outline:2px solid #e794aa;outline-offset:2px}
+.confirm-modal .modal-title>div{color:#ffb0c0}
+.confirm-modal>p{font-size:13px;line-height:1.7;margin:19px 0;color:#c1cbdf}
+.confirm-modal .modal-actions button:last-child{background:#a04c69;border-color:#a04c69}
+.confirm-modal .modal-actions button:last-child:hover{background:#b95c7b}
