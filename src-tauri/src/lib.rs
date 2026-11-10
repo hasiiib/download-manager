@@ -114,6 +114,8 @@ struct MediaJob {
     format: String,
     #[serde(default)]
     playlist: bool,
+    #[serde(default)]
+    playlist_items: Vec<u32>,
     error: Option<String>,
     #[serde(default)]
     progress: Option<f32>,
@@ -172,6 +174,68 @@ struct MediaPreview {
     webpage_url: String,
     yt_dlp_version: String,
     formats: Vec<MediaFormat>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaylistPreview {
+    title: String,
+    entries: Vec<PlaylistEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaylistEntry {
+    index: u32,
+    title: String,
+    duration_seconds: Option<f64>,
+}
+
+fn playlist_entries(info: &Value) -> Vec<PlaylistEntry> {
+    info.get("entries").and_then(Value::as_array).into_iter().flatten()
+        .take(50).enumerate().filter_map(|(offset, entry)| {
+            if entry.is_null() { return None; }
+            Some(PlaylistEntry {
+                index: (offset + 1) as u32,
+                title: entry.get("title").and_then(Value::as_str).unwrap_or("Untitled video")
+                    .chars().filter(|ch| !ch.is_control()).take(180).collect(),
+                duration_seconds: entry.get("duration").and_then(Value::as_f64),
+            })
+        }).collect()
+}
+
+fn validate_playlist_items(items: &[u32], playlist: bool) -> Result<(), String> {
+    if !playlist && !items.is_empty() { return Err("Playlist items require playlist mode".into()); }
+    if items.len() > 50 || items.iter().any(|index| !(1..=50).contains(index)) {
+        return Err("Playlist item indexes must be between 1 and 50".into());
+    }
+    let unique: std::collections::BTreeSet<u32> = items.iter().copied().collect();
+    if unique.len() != items.len() { return Err("Duplicate playlist indexes are not allowed".into()); }
+    Ok(())
+}
+
+#[tauri::command]
+async fn inspect_playlist(source: String) -> Result<PlaylistPreview, String> {
+    media_http_url(&source)?;
+    tokio::task::spawn_blocking(move || {
+        let output = Command::new("yt-dlp")
+            .args(["--ignore-config", "--flat-playlist", "--playlist-end", "50",
+                "--dump-single-json", "--no-warnings", "--no-call-home"])
+            .arg("--").arg(&source)
+            .stdin(Stdio::null()).output()
+            .map_err(|_| "yt-dlp missing or could not inspect the playlist".to_string())?;
+        if !output.status.success() {
+            return Err("Playlist inspection failed; confirm the URL is a supported public playlist".into());
+        }
+        if output.stdout.len() > 2_000_000 { return Err("Playlist metadata is too large".into()); }
+        let info: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|_| "yt-dlp returned invalid playlist metadata")?;
+        Ok(PlaylistPreview {
+            title: info.get("title").and_then(Value::as_str).unwrap_or("Playlist")
+                .chars().filter(|ch| !ch.is_control()).take(180).collect(),
+            entries: playlist_entries(&info),
+        })
+    }).await.map_err(|error| error.to_string())?
 }
 
 #[derive(Serialize)]
@@ -1254,12 +1318,13 @@ fn retry_media_download(engine: State<'_, Engine>, id: String) -> Result<MediaJo
     };
     // Existing partial files remain on disk, letting yt-dlp resume where the
     // server and media format support it. The old history record is preserved.
-    start_media_download(engine, original.title, original.format, original.playlist)
+    start_media_download(engine, original.title, original.format, original.playlist, original.playlist_items)
 }
 
 #[tauri::command]
-fn start_media_download(engine: State<'_, Engine>, source: String, format: String, playlist: bool) -> Result<MediaJob, String> {
+fn start_media_download(engine: State<'_, Engine>, source: String, format: String, playlist: bool, playlist_items: Vec<u32>) -> Result<MediaJob, String> {
     media_http_url(&source)?;
+    validate_playlist_items(&playlist_items, playlist)?;
     if playlist && format.starts_with("id:") {
         return Err("Exact format IDs apply only to one inspected media item, not a playlist".into());
     }
@@ -1272,6 +1337,10 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         // Bound playlist size; downloading arbitrary thousands of remote entries
         // should require separate explicit batches.
         command.args(["--yes-playlist", "--playlist-end", "50"]);
+        if !playlist_items.is_empty() {
+            command.arg("--playlist-items");
+            command.arg(playlist_items.iter().map(u32::to_string).collect::<Vec<_>>().join(","));
+        }
     } else {
         command.arg("--no-playlist");
     }
@@ -1284,7 +1353,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let id = uuid::Uuid::new_v4().to_string();
     let job = MediaJob {
         id: id.clone(), title: source, status: "downloading".into(),
-        format, playlist, error: None, progress: None, speed: String::new(), eta: String::new(),
+        format, playlist, playlist_items, error: None, progress: None, speed: String::new(), eta: String::new(),
         current_item: String::new(), playlist_index: None,
     };
     {
@@ -1883,11 +1952,25 @@ mod tests {
     }
 
     #[test]
+    fn playlist_selection_has_unique_bounded_one_based_indexes() {
+        assert!(validate_playlist_items(&[], false).is_ok());
+        assert!(validate_playlist_items(&[1, 3, 50], true).is_ok());
+        assert!(validate_playlist_items(&[0], true).is_err());
+        assert!(validate_playlist_items(&[51], true).is_err());
+        assert!(validate_playlist_items(&[1, 1], true).is_err());
+        assert!(validate_playlist_items(&[2], false).is_err());
+        let entries = playlist_entries(&json!({"entries":[
+            {"title":"First"},{"title":"Second"},null,{"title":"Fourth"}]}));
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[2].index, 4);
+    }
+
+    #[test]
     fn paused_media_is_interrupted_on_restart() {
         let jobs = BTreeMap::from([("pause".into(), MediaJob {
             id: "pause".into(), title: "https://example.org/watch".into(),
             status: "paused".into(), format: "mp4".into(), playlist: false,
-            error: None, progress: Some(12.0), speed: String::new(), eta: String::new(),
+            playlist_items: vec![], error: None, progress: Some(12.0), speed: String::new(), eta: String::new(),
             current_item: String::new(), playlist_index: None,
         })]);
         let resumed = restore_media_jobs(jobs);
@@ -1899,7 +1982,7 @@ mod tests {
         let job = MediaJob {
             id: "one".into(), title: "https://example.org/video".into(),
             status: "downloading".into(), format: "mp4".into(), playlist: true,
-            error: None, progress: Some(20.0), speed: "4MiB/s".into(), eta: "00:30".into(),
+            playlist_items: vec![1, 3], error: None, progress: Some(20.0), speed: "4MiB/s".into(), eta: "00:30".into(),
             current_item: String::new(), playlist_index: None,
         };
         let jobs = restore_media_jobs(BTreeMap::from([("one".into(), job)]));
@@ -2133,7 +2216,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
