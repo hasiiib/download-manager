@@ -472,6 +472,8 @@ async fn add_batch(engine: State<'_, Engine>, sources: Vec<String>) -> Result<Ba
 #[tauri::command]
 async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, String> {
     let snapshot: Vec<Download> = engine.downloads.lock().map_err(|e| e.to_string())?.values().cloned().collect();
+    let existing_at_poll_start: std::collections::BTreeSet<String> =
+        snapshot.iter().map(|item| item.gid.clone()).collect();
     let mut updated = Vec::with_capacity(snapshot.len());
     let mut discovered = Vec::new();
     // Poll transfers concurrently rather than serially: a slow RPC response should not
@@ -552,10 +554,15 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
                     entries.insert(item.gid.clone(), item.clone());
                     changed = true;
                 }
-                None => {
+                None if !existing_at_poll_start.contains(&item.gid) => {
+                    // Newly discovered child transfer (e.g. torrent metadata).
                     urgent = true;
                     entries.insert(item.gid.clone(), item.clone());
                     changed = true;
+                }
+                None => {
+                    // A concurrent Forget/Retry removed this GID after the
+                    // RPC poll began. Never resurrect it from stale results.
                 }
             }
         }
