@@ -487,6 +487,29 @@ fn may_insert_polled_gid(
     !existing_at_poll_start.contains(gid)
 }
 
+// aria2's waiting list is the source of truth for queue positions.
+// Preserve the relative order of all non-waiting entries, and fall back to
+// the original history order if a queue RPC fails.
+fn sort_by_waiting_queue(items: &mut [Download], waiting: &Value) {
+    let mut rank = BTreeMap::new();
+    if let Some(queue) = waiting.as_array() {
+        for (position, entry) in queue.iter().enumerate() {
+            if let Some(gid) = entry.get("gid").and_then(Value::as_str) {
+                rank.entry(gid.to_string()).or_insert(position);
+            }
+        }
+    }
+    if rank.is_empty() { return; }
+    items.sort_by_key(|item| {
+        if item.status == "waiting" {
+            rank.get(&item.gid).map(|position| (0, *position))
+                .unwrap_or((1, usize::MAX))
+        } else {
+            (1, usize::MAX)
+        }
+    });
+}
+
 #[tauri::command]
 async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, String> {
     let snapshot: Vec<Download> = engine.downloads.lock().map_err(|e| e.to_string())?.values().cloned().collect();
@@ -560,6 +583,15 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
     }
     updated.extend(discovered);
     updated.reverse();
+    // Only one extra local RPC for the full waiting queue, never per row.
+    // Queue moves become visible even if history was inserted in GID order.
+    if updated.iter().any(|item| item.status == "waiting") {
+        if let Ok(waiting) = engine.rpc("tellWaiting", vec![
+            json!(0), json!(1000), json!(["gid"]),
+        ]).await {
+            sort_by_waiting_queue(&mut updated, &waiting);
+        }
+    }
     // Store completed state and filenames for display after restarting the application.
     if let Ok(mut entries) = engine.downloads.lock() {
         let mut changed = false;
@@ -998,6 +1030,31 @@ mod tests {
         assert!(load_validated_settings(&path).is_err());
         fs::remove_dir_all(&folder).unwrap();
     }
+    #[test]
+    fn waiting_queue_uses_actual_aria2_positions() {
+        let make = |gid: &str, status: &str| Download {
+            gid: gid.into(), source: "https://example.org/file".into(),
+            is_torrent: false, name: gid.into(), status: status.into(),
+            completed_length: 0, total_length: 10, download_speed: 0,
+            upload_speed: 0, path: String::new(), error: None,
+        };
+        let mut items = vec![
+            make("done", "complete"),
+            make("later", "waiting"),
+            make("active", "active"),
+            make("first", "waiting"),
+        ];
+        sort_by_waiting_queue(&mut items, &json!([
+            {"gid":"first"}, {"gid":"later"},
+        ]));
+        let order: Vec<_> = items.iter().map(|item| item.gid.as_str()).collect();
+        assert_eq!(order, vec!["first", "later", "done", "active"]);
+        // Invalid or unavailable queue responses leave ordering untouched.
+        sort_by_waiting_queue(&mut items, &Value::Null);
+        let unchanged: Vec<_> = items.iter().map(|item| item.gid.as_str()).collect();
+        assert_eq!(unchanged, order);
+    }
+
     #[test]
     fn restart_statuses_are_reconciled_before_retry() {
         assert!(status_needs_reconciliation("active"));
