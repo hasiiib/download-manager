@@ -1031,6 +1031,18 @@ fn cancel_schedule(engine: State<'_, Engine>) -> Result<Schedule, String> {
     Ok(next)
 }
 
+async fn engine_has_unfinished_transfers(engine: &Engine) -> Result<bool, String> {
+    // Include follow-up payload downloads created by torrent/metalink metadata,
+    // and jobs added after the schedule was armed. Never power off while work
+    // is still active or queued.
+    let active = engine.rpc("tellActive", vec![json!(["gid"])]).await?;
+    if active.as_array().is_none_or(|list| !list.is_empty()) { return Ok(true); }
+    let waiting = engine.rpc("tellWaiting", vec![
+        json!(0), json!(1000), json!(["gid", "status"]),
+    ]).await?;
+    Ok(waiting.as_array().is_none_or(|list| !list.is_empty()))
+}
+
 // Runs only while the desktop app is open; the engine is a managed Tauri
 // resource. Scheduler state is checkpointed across ordinary UI navigation.
 async fn schedule_tick(engine: &Engine) {
@@ -1074,6 +1086,14 @@ async fn schedule_tick(engine: &Engine) {
             }
         }
         if completed + failed != schedule.gids.len() { return; }
+        if failed == 0 && schedule.after_complete != "none" {
+            // A completed torrent metadata GID may have spawned a real payload
+            // transfer. Delay power actions until the private engine is idle.
+            match engine_has_unfinished_transfers(engine).await {
+                Ok(false) => {},
+                _ => return,
+            }
+        }
         if let Ok(mut lock) = engine.schedule.lock() {
             if lock.state != "running" { return; }
             let mut next = lock.clone();
@@ -1095,6 +1115,12 @@ async fn schedule_tick(engine: &Engine) {
         return;
     }
     if schedule.state == "power_pending" && now >= schedule.power_at_unix {
+        // A new download may have started during the 60-second grace period.
+        // Refuse to power off if any aria2 transfer remains.
+        match engine_has_unfinished_transfers(engine).await {
+            Ok(false) => {},
+            _ => return,
+        }
         // Re-check before acting, including after the grace period. Mark
         // completed before launch to avoid issuing a second power command.
         let action = if schedule.after_complete == "sleep" { "suspend" } else { "poweroff" };
