@@ -36,6 +36,7 @@ type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
 type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string };
 type MediaJob = { id: string; title: string; status: string; format: string; error: string | null; progress: number | null; speed: string; eta: string };
+type MediaTools = { ytDlp: string | null; ffmpeg: string | null };
 
 type Schedule = {
   state: "idle" | "armed" | "running" | "power_pending" | "completed" | "cancelled" | "error";
@@ -105,6 +106,7 @@ export default function App() {
   const [mediaFormat, setMediaFormat] = useState<"best" | "mp4" | "audio">("mp4");
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
+  const [mediaTools, setMediaTools] = useState<MediaTools | null>(null);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaError, setMediaError] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -319,6 +321,15 @@ export default function App() {
 
   useEffect(() => {
     if (!mediaOpen) return;
+    let active = true;
+    void invoke<MediaTools>("media_tools_status")
+      .then(status => { if (active) setMediaTools(status); })
+      .catch(() => { if (active) setMediaTools(null); });
+    return () => { active = false; };
+  }, [mediaOpen]);
+
+  useEffect(() => {
+    if (!mediaOpen) return;
     let mounted = true;
     const poll = () => {
       void invoke<MediaJob[]>("list_media_jobs")
@@ -329,6 +340,17 @@ export default function App() {
     const timer = window.setInterval(poll, 1500);
     return () => { mounted = false; window.clearInterval(timer); };
   }, [mediaOpen]);
+
+  const retryMedia = async (id: string) => {
+    setMediaError("");
+    try {
+      const result = await invoke<MediaJob>("retry_media_download", { id });
+      setMediaJobs(jobs => [...jobs, result]);
+      setMediaError("Retry started. Existing partial files may be reused.");
+    } catch (error) {
+      setMediaError(String(error));
+    }
+  };
 
   const cancelMedia = async (id: string) => {
     setMediaError("");
@@ -504,12 +526,12 @@ export default function App() {
     {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
       <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
         <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
-        <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg. No software is auto-installed.</p>
+        <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg. No software is auto-installed.</p>{mediaTools && <div className="media-tool-status" role="status"><span>yt-dlp: <b>{mediaTools.ytDlp ? "Installed (" + mediaTools.ytDlp + ")" : "Missing"}</b></span><span>FFmpeg: <b>{mediaTools.ffmpeg ? "Installed" : "Missing (needed for merging / MP3)"}</b></span></div>}
         <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); }} placeholder="https://example.com/video"/></label>
         <div className="media-actions"><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectMedia()}>{mediaBusy ? "Working..." : "Inspect media"}</button></div>
         {mediaPreview && <div className="media-preview"><strong>{mediaPreview.title}</strong>{mediaPreview.uploader && <small>{mediaPreview.uploader}</small>}{mediaPreview.durationSeconds != null && <small>Duration: {Math.floor(mediaPreview.durationSeconds / 60)}m {Math.floor(mediaPreview.durationSeconds % 60)}s</small>}<small>yt-dlp {mediaPreview.ytDlpVersion}</small></div>}
         <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value as "best" | "mp4" | "audio")}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="audio">MP3 audio</option></select></label>
-        {mediaJobs.length > 0 && <div className="media-job-list" aria-label="Media download jobs">{mediaJobs.map(job => <div key={job.id}><span title={job.title}>{job.title}</span><strong className={job.status === "error" ? "media-job-error" : ""}>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>{job.status === "downloading" && <button type="button" className="media-job-cancel" onClick={() => void cancelMedia(job.id)} aria-label={"Cancel media download " + job.title}>Cancel</button>}{job.progress != null && <progress className="media-progress" max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}{job.status === "downloading" && (job.speed || job.eta) && <small className="media-job-stats">{job.speed}{job.speed && job.eta ? " · " : ""}{job.eta && "ETA " + job.eta}</small>}{job.error && <small>{job.error}</small>}</div>)}</div>}
+        {mediaJobs.length > 0 && <div className="media-job-list" aria-label="Media download jobs">{mediaJobs.map(job => <div key={job.id}><span title={job.title}>{job.title}</span><strong className={job.status === "error" ? "media-job-error" : ""}>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>{job.status === "downloading" && <button type="button" className="media-job-cancel" onClick={() => void cancelMedia(job.id)} aria-label={"Cancel media download " + job.title}>Cancel</button>}{["error","cancelled","interrupted"].includes(job.status) && <button type="button" className="media-job-cancel" onClick={() => void retryMedia(job.id)} aria-label={"Retry media download " + job.title}>Retry</button>}{job.progress != null && <progress className="media-progress" max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}{job.status === "downloading" && (job.speed || job.eta) && <small className="media-job-stats">{job.speed}{job.speed && job.eta ? " · " : ""}{job.eta && "ETA " + job.eta}</small>}{job.error && <small>{job.error}</small>}</div>)}</div>}
         {mediaError && <p className="settings-note" role="status">{mediaError}</p>}
         <div className="modal-actions"><button type="button" onClick={() => setMediaOpen(false)}>Close</button><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void startMedia()}>{mediaBusy ? "Starting..." : "Start media download"}</button></div>
       </section>
