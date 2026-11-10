@@ -52,7 +52,7 @@ impl Settings {
             refresh_seconds: default_refresh_seconds(), low_memory_mode: default_low_memory_mode() }
     }
     fn validate(&self) -> Result<(), String> {
-        if !(1..=16).contains(&self.connections) { return Err("Connections must be 1–16".into()); }
+        if !(1..=32).contains(&self.connections) { return Err("Connections must be 1–32".into()); }
         if !(1..=64).contains(&self.min_split_size_mib) { return Err("Minimum segment size must be 1–64 MiB".into()); }
         if !(1..=10).contains(&self.concurrent) { return Err("Concurrent downloads must be 1–10".into()); }
         if self.download_dir.trim().is_empty() { return Err("Download folder cannot be empty".into()); }
@@ -1533,7 +1533,11 @@ mod tests {
         assert!(settings.validate().is_ok());
         settings.connections = 0;
         assert!(settings.validate().is_err());
-        settings.connections = 16;
+        settings.connections = 32;
+        assert!(settings.validate().is_ok());
+        settings.connections = 33;
+        assert!(settings.validate().is_err());
+        settings.connections = 8;
         assert!(settings.validate().is_ok());
         settings.min_split_size_mib = 0;
         assert!(settings.validate().is_err());
