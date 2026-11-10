@@ -202,6 +202,13 @@ fn save_json<T: Serialize + serde::de::DeserializeOwned>(path: &std::path::Path,
     Ok(())
 }
 
+// Reconciliation after app launch must distinguish "not found in the new
+// aria2 session" from "not checked yet". Never allow duplicate retries while
+// session restoration is still pending.
+fn status_needs_reconciliation(status: &str) -> bool {
+    matches!(status, "active" | "waiting" | "paused")
+}
+
 impl Engine {
     fn start() -> Result<Self, Box<dyn std::error::Error>> {
         let data_dir = home().join(".local").join("share").join("download-manager");
@@ -218,8 +225,10 @@ impl Engine {
         for download in history.values_mut() {
             download.download_speed = 0;
             download.upload_speed = 0;
-            if matches!(download.status.as_str(), "active" | "waiting") {
-                download.status = "interrupted".into();
+            if status_needs_reconciliation(&download.status) {
+                // aria2 may restore this GID from its session. Do not offer a
+                // duplicate Retry until a live RPC lookup determines its state.
+                download.status = "recovering".into();
             }
         }
         let session = data_dir.join("aria2.session");
@@ -541,7 +550,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             }
         } else if result.as_ref().and_then(|result| result.as_ref().err())
             .is_some_and(|error| is_missing_gid_error(error)) {
-            if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
+            if matches!(item.status.as_str(), "active" | "waiting" | "paused" | "recovering") {
                 item.status = "interrupted".into();
             }
             item.download_speed = 0;
@@ -989,6 +998,18 @@ mod tests {
         assert!(load_validated_settings(&path).is_err());
         fs::remove_dir_all(&folder).unwrap();
     }
+    #[test]
+    fn restart_statuses_are_reconciled_before_retry() {
+        assert!(status_needs_reconciliation("active"));
+        assert!(status_needs_reconciliation("waiting"));
+        assert!(status_needs_reconciliation("paused"));
+        assert!(!status_needs_reconciliation("complete"));
+        assert!(!status_needs_reconciliation("error"));
+        assert!(!status_needs_reconciliation("removed"));
+        assert!(!is_historical_status("recovering"));
+        assert!(!matches!("recovering", "error" | "removed" | "interrupted"));
+    }
+
     #[test]
     fn stale_polls_must_not_resurrect_removed_downloads() {
         let original = std::collections::BTreeSet::from([
