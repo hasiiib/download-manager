@@ -35,8 +35,9 @@ type Settings = {
 type Filter = "all" | "active" | "complete" | "error" | "torrent";
 type SortOrder = "default" | "name" | "size" | "progress";
 type MediaFormat = { id: string; extension: string; resolution: string; note: string; filesize: number | null };
+type PlaylistPreview = { title: string; entries: { index: number; title: string; durationSeconds: number | null }[] };
 type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string; formats: MediaFormat[] };
-type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; error: string | null; progress: number | null; speed: string; eta: string; currentItem: string; playlistIndex: number | null };
+type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; playlistItems: number[]; error: string | null; progress: number | null; speed: string; eta: string; currentItem: string; playlistIndex: number | null };
 type MediaTools = { ytDlp: string | null; ffmpeg: string | null };
 
 type Schedule = {
@@ -106,6 +107,8 @@ export default function App() {
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaFormat, setMediaFormat] = useState("mp4");
   const [mediaPlaylist, setMediaPlaylist] = useState(false);
+  const [playlistPreview, setPlaylistPreview] = useState<PlaylistPreview | null>(null);
+  const [selectedPlaylistItems, setSelectedPlaylistItems] = useState<number[]>([]);
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [mediaTools, setMediaTools] = useState<MediaTools | null>(null);
@@ -374,6 +377,20 @@ export default function App() {
     }
   };
 
+  const inspectPlaylist = async () => {
+    setMediaBusy(true);
+    setMediaError("");
+    setPlaylistPreview(null);
+    setSelectedPlaylistItems([]);
+    try {
+      const info = await invoke<PlaylistPreview>("inspect_playlist", { source: mediaUrl.trim() });
+      setPlaylistPreview(info);
+      setSelectedPlaylistItems(info.entries.map(item => item.index));
+      if (info.entries.length === 0) setMediaError("No selectable items found in the first 50 playlist entries.");
+    } catch (error) { setMediaError(String(error)); }
+    finally { setMediaBusy(false); }
+  };
+
   const inspectMedia = async () => {
     setMediaBusy(true);
     setMediaError("");
@@ -390,12 +407,17 @@ export default function App() {
     setMediaBusy(true);
     setMediaError("");
     try {
+      if (mediaPlaylist && playlistPreview && selectedPlaylistItems.length === 0) {
+        setMediaError("Select at least one playlist item to download.");
+        return;
+      }
       if (mediaPlaylist && mediaFormat.startsWith("id:")) {
         setMediaError("Exact format IDs apply to one inspected video. Choose a quality preset for playlists.");
         return;
       }
       const job = await invoke<MediaJob>("start_media_download", {
         source: mediaUrl.trim(), format: mediaFormat, playlist: mediaPlaylist,
+        playlistItems: mediaPlaylist && playlistPreview ? selectedPlaylistItems : [],
       });
       setMediaJobs(jobs => [...jobs, job]);
       setMediaPreview(null);
@@ -544,12 +566,20 @@ export default function App() {
       <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
         <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
         <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg. No software is auto-installed.</p>{mediaTools && <div className="media-tool-status" role="status"><span>yt-dlp: <b>{mediaTools.ytDlp ? "Installed (" + mediaTools.ytDlp + ")" : "Missing"}</b></span><span>FFmpeg: <b>{mediaTools.ffmpeg ? "Installed" : "Missing (needed for merging / MP3)"}</b></span></div>}
-        <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); setMediaFormat("mp4"); }} placeholder="https://example.com/video"/></label>
+        <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); setPlaylistPreview(null); setSelectedPlaylistItems([]); setMediaFormat("mp4"); }} placeholder="https://example.com/video"/></label>
         <div className="media-actions"><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectMedia()}>{mediaBusy ? "Working..." : "Inspect media"}</button></div>
         {mediaPreview && <div className="media-preview"><strong>{mediaPreview.title}</strong>{mediaPreview.uploader && <small>{mediaPreview.uploader}</small>}{mediaPreview.durationSeconds != null && <small>Duration: {Math.floor(mediaPreview.durationSeconds / 60)}m {Math.floor(mediaPreview.durationSeconds % 60)}s</small>}<small>yt-dlp {mediaPreview.ytDlpVersion}</small></div>}
         <label><span>Download format</span><select value={mediaFormat} onChange={event => setMediaFormat(event.target.value)}><option value="mp4">MP4 video (compatible)</option><option value="best">Best available video</option><option value="1080p">Up to 1080p video</option><option value="720p">Up to 720p video</option><option value="audio">MP3 audio</option>{mediaPreview && mediaPreview.formats.length > 0 && <optgroup disabled={mediaPlaylist} label={mediaPlaylist ? "Exact formats unavailable for playlists" : "Available formats from inspected media"}>{mediaPreview.formats.map(fmt => <option key={fmt.id} value={"id:" + fmt.id}>{fmt.id} · {fmt.extension || "unknown"} · {fmt.resolution}{fmt.note ? " · " + fmt.note : ""}{fmt.filesize != null ? " · " + formatSize(fmt.filesize) : ""}</option>)}</optgroup>}</select></label>
         {mediaPreview && mediaPreview.formats.length > 0 && <p className="media-format-note">{mediaPreview.formats.length} available format(s) found. Selecting an exact format may download video-only or audio-only; use a preset for automatic merging.</p>}
         <label className="media-playlist-toggle"><input type="checkbox" checked={mediaPlaylist} onChange={event => { setMediaPlaylist(event.target.checked); if (event.target.checked && mediaFormat.startsWith("id:")) setMediaFormat("mp4"); }}/><span>Download playlist (up to 50 items, one job)</span></label>
+        {mediaPlaylist && <div className="media-playlist-selection">
+          <button type="button" className="bulk-control" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectPlaylist()}>Inspect playlist items</button>
+          {playlistPreview && <div className="playlist-inspection"><strong>{playlistPreview.title} · {selectedPlaylistItems.length} selected</strong>
+            <div className="playlist-select-actions"><button type="button" onClick={() => setSelectedPlaylistItems(playlistPreview.entries.map(item => item.index))}>Select all</button><button type="button" onClick={() => setSelectedPlaylistItems([])}>Select none</button></div>
+            <div className="playlist-inspection-rows">{playlistPreview.entries.map(item => <label key={item.index}><input type="checkbox" checked={selectedPlaylistItems.includes(item.index)} onChange={event => setSelectedPlaylistItems(indices => event.target.checked ? [...indices, item.index].sort((a, b) => a-b) : indices.filter(n => n !== item.index))}/><span>{item.index}. {item.title}</span></label>)}</div>
+          </div>}
+          {!playlistPreview && <small>Optional: inspect and choose specific entries. Without inspection, the first 50 entries are used.</small>}
+        </div>}
         {mediaJobs.length > 0 && <div className="media-job-list" aria-label="Media download jobs">{mediaJobs.map(job => <div key={job.id}><span title={job.title}>{job.title}</span><strong className={job.status === "error" ? "media-job-error" : ""}>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>{job.status === "downloading" && <button type="button" className="media-job-cancel" onClick={() => void controlMedia(job.id, "pause")} aria-label={"Pause media download " + job.title}>Pause</button>}{job.status === "paused" && <button type="button" className="media-job-cancel" onClick={() => void controlMedia(job.id, "resume")} aria-label={"Resume media download " + job.title}>Resume</button>}{["downloading","paused"].includes(job.status) && <button type="button" className="media-job-cancel" onClick={() => void cancelMedia(job.id)} aria-label={"Cancel media download " + job.title}>Cancel</button>}{["error","cancelled","interrupted"].includes(job.status) && <button type="button" className="media-job-cancel" onClick={() => void retryMedia(job.id)} aria-label={"Retry media download " + job.title}>Retry</button>}{job.playlist && job.playlistIndex != null && <small className="media-job-stats">Playlist item {job.playlistIndex} of up to 50{job.currentItem ? " · " + job.currentItem : ""} · item progress</small>}{job.progress != null && <progress className="media-progress" max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}{job.status === "downloading" && (job.speed || job.eta) && <small className="media-job-stats">{job.speed}{job.speed && job.eta ? " · " : ""}{job.eta && "ETA " + job.eta}</small>}{job.error && <small>{job.error}</small>}</div>)}</div>}
         {mediaError && <p className="settings-note" role="status">{mediaError}</p>}
         <div className="modal-actions"><button type="button" onClick={() => setMediaOpen(false)}>Close</button><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void startMedia()}>{mediaBusy ? "Starting..." : "Start media download"}</button></div>
