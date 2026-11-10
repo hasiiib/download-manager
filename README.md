@@ -459,3 +459,13 @@ A user-selected power action is delayed **60 seconds** after successful completi
 **Important:** This is an initial implementation, not a verified release. The UI, Rust compilation, scheduled execution, Linux permissions, desktop shutdown/sleep and reboot/recovery behavior have **not** yet been tested on the user's Ubuntu laptop. Scheduled system actions can interrupt unsaved documents in other applications. They default to **Do nothing** and require explicit selection when arming.
 
 When the Ubuntu machine becomes available, close Download Manager and run the existing single command `bash ~/download-manager/scripts/update-ubuntu.sh` to pull, QA-test, build, reinstall and launch. First test a small schedule with **Do nothing**; only test sleep/shutdown after saving all work and confirming there are no unrelated system tasks.
+
+## Priority update and segmented download tuning
+
+Browser interception and extensions have been moved to the **last implementation priority** by request, without removing them from [FEATURES.md](FEATURES.md). The active priorities are acceleration, video downloads and RSS, scheduler reliability and richer queue management, followed by the remaining desktop features.
+
+### Segmented HTTP acceleration
+
+Connection settings now include **Minimum segment size (MiB)**, configurable from **1 to 64 MiB** (default 4 MiB) alongside **Connections per server** (1–16). The Rust backend validates and persists the setting with backward-compatible defaults for existing settings files, passes it to the app-owned aria2 engine at startup, and applies it to newly enqueued transfers. The frontend exposes it under Settings → Connection & speed. Reducing the minimum split threshold may let aria2 parallelize smaller range-capable downloads; actual speed depends on server support, network and disk, and some hosts are slower with many connections. Existing active jobs are not silently reconfigured.
+
+This is not a proven speed multiplier. Automated range/resume benchmarks and desktop tests remain outstanding; the code must pass CI before being considered validated. No third-party code was copied.
