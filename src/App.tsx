@@ -58,7 +58,7 @@ const formatEta = (seconds: number) => {
   return "Over a day left";
 };
 const isTorrent = (item: DownloadItem) => item.isTorrent || item.source.startsWith("magnet:") || /\.(torrent)(\?|$)/i.test(item.source);
-const activeState = (s: string) => ["active", "waiting", "paused"].includes(s);
+const activeState = (s: string) => ["active", "waiting", "paused", "recovering"].includes(s);
 const filtered = (d: DownloadItem, filter: Filter) => filter === "all" ||
   (filter === "active" && activeState(d.status)) ||
   (filter === "complete" && d.status === "complete") ||
@@ -69,6 +69,7 @@ function StatusIcon({ status }: { status: string }) {
   if (status === "complete") return <CheckCircle2 size={13} />;
   if (status === "error" || status === "removed" || status === "interrupted") return <XCircle size={13} />;
   if (status === "active") return <Activity size={13} />;
+  if (status === "recovering") return <Clock3 size={13} />;
   return <Clock3 size={13} />;
 }
 
@@ -343,7 +344,7 @@ export default function App() {
               {item.status === "waiting" && <><button title="Move to top of queue" aria-label={"Prioritize " + item.name} onClick={() => void moveQueue(item.gid, "top")}><ArrowUpToLine size={17}/></button><button title="Move to bottom of queue" aria-label={"Deprioritize " + item.name} onClick={() => void moveQueue(item.gid, "bottom")}><QueueBottomIcon size={17}/></button></>}
               {["active", "waiting"].includes(item.status) && <button title="Pause" aria-label={"Pause " + item.name} onClick={() => void control(item.gid, "pause")}><Pause size={17}/></button>}
               {item.status === "paused" && <button title="Resume" aria-label={"Resume " + item.name} onClick={() => void control(item.gid, "resume")}><Play size={17}/></button>}
-              {activeState(item.status) && <button title="Cancel" aria-label={"Cancel " + item.name} onClick={() => void control(item.gid, "cancel")}><X size={17}/></button>}
+              {["active", "waiting", "paused"].includes(item.status) && <button title="Cancel" aria-label={"Cancel " + item.name} onClick={() => void control(item.gid, "cancel")}><X size={17}/></button>}
               {["error", "removed", "interrupted"].includes(item.status) && <button title="Retry download" aria-label={"Retry " + item.name} onClick={() => void retry(item)}><Play size={17}/></button>}
               {item.status === "complete" && <button title="Open containing folder" aria-label={"Open folder for " + item.name} onClick={() => void openFolder(item.gid)}><FolderOpen size={17}/></button>}
               {!activeState(item.status) && <button title="Remove from history (does not delete files)" aria-label={"Forget " + item.name} onClick={() => void forget(item.gid)}><Trash2 size={17}/></button>}
