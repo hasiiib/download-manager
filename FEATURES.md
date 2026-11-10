@@ -2,6 +2,16 @@
 
 This is the enduring backlog. **Planned is not implemented.** Existing features remain in scope until they are delivered and verified on a real desktop.
 
+## Priority order (updated)
+1. Download acceleration, segmented connection controls, real HTTP range/resume benchmarks and server compatibility.
+2. Video/audio/playlist downloading with opt-in yt-dlp and ffmpeg, RSS, media extraction.
+3. Queue groups, recurring scheduler, download concurrency profiles, shutdown/sleep correctness.
+4. Download categories, authentication/proxies, hash checks, import/export, themes and translations.
+5. Installer polish, native desktop notifications, platform and accessibility tests.
+6. **Browser integration and interception: deliberately last priority, still in scope.** Firefox/Chromium extensions are not removed from the roadmap.
+
+This ordering is for implementation priority only. No requested feature is dropped.
+
 ## Core transfers and reliability
 - [x] Direct HTTP/HTTPS/FTP downloads through aria2
 - [x] Torrent, magnet and metalink ingestion
@@ -12,7 +22,7 @@ This is the enduring backlog. **Planned is not implemented.** Existing features 
 - [x] Download history and completed-history cleanup
 - [x] Atomic history/settings writes with backup recovery
 - [ ] Verify resumed, interrupted and torrent downloads end-to-end after restart on Ubuntu
-- [ ] Download accelerator controls with benchmarks: segmented connections, per-host and global limits, adaptive tuning and reliable range fallback
+- [ ] Download accelerator controls with benchmarks: segmented connections and minimum segment-size tuning now committed (unverified); per-host and global limits, adaptive tuning, measured speed gains and reliable range fallback remain to build/test
 - [ ] Batch rename, move and duplicate detection with overwrite policies
 - [ ] File integrity verification, hashes and optional malware scanning
 - [ ] Queue groups, priorities, simultaneous transfer profiles and scheduling
@@ -25,9 +35,7 @@ This is the enduring backlog. **Planned is not implemented.** Existing features 
 - [ ] Repeat schedules, scheduled start/stop windows and bandwidth profiles
 - [ ] Start-at-login / tray support and recovery if application exits before scheduled time
 
-## Browser, media and sources
-- [ ] Browser extensions for Firefox, Chromium, Chrome, Edge and Brave via authenticated Native Messaging
-- [ ] Download interception / URL handoff with user control and exclusions
+## Media, RSS and sources (high priority)
 - [ ] yt-dlp and ffmpeg opt-in integration for video/audio, playlists and format selection
 - [ ] RSS subscriptions, filters and automatic episode/file downloads
 - [ ] HTTP link grabber and downloadable asset discovery
@@ -48,3 +56,8 @@ This is the enduring backlog. **Planned is not implemented.** Existing features 
 
 ## Validation rule
 Each entry is complete only after working code, tests, security review, and where applicable interactive platform verification. Offline commits are provisional. Never silently drop an earlier request. Third-party repositories are inspiration only; honor their licenses rather than copying GPL code into this project unreviewed.
+
+## Browser integration (last implementation priority, not cancelled)
+- [ ] Browser extensions for Firefox, Chromium, Chrome, Edge and Brave via authenticated Native Messaging
+- [ ] Download interception / URL handoff with user control and exclusions
+- [ ] Browser cookies and authenticated transfers with consent and site exclusions
