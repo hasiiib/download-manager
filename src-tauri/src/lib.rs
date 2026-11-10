@@ -877,15 +877,28 @@ fn open_download_folder(engine: State<'_, Engine>, gid: String) -> Result<(), St
     }
 }
 
-#[tauri::command]
-fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String> {
-    let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
-    let item = entries.get(&gid).ok_or("Unknown download")?;
+// Commit the history change on disk before publishing it in memory. If the
+// filesystem is full or not writable, a failed removal must remain visible.
+fn forget_history_entry(
+    entries: &mut BTreeMap<String, Download>,
+    gid: &str,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let item = entries.get(gid).ok_or("Unknown download")?;
     if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
         return Err("Stop the download before removing it from history".into());
     }
-    entries.remove(&gid);
-    save_json(&engine.data_dir.join("downloads.json"), &*entries)
+    let mut next = entries.clone();
+    next.remove(gid);
+    save_json(path, &next)?;
+    *entries = next;
+    Ok(())
+}
+
+#[tauri::command]
+fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String> {
+    let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
+    forget_history_entry(&mut entries, &gid, &engine.data_dir.join("downloads.json"))
 }
 
 #[cfg(test)]
@@ -960,6 +973,40 @@ mod tests {
         assert!(load_validated_settings(&path).is_err());
         fs::remove_dir_all(&folder).unwrap();
     }
+    #[test]
+    fn failed_history_removal_preserves_download_and_success_persists() {
+        let folder = std::env::temp_dir().join(format!("dm-forget-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("downloads.json");
+        let item = Download {
+            gid: "done".into(), source: "https://example.org/test.txt".into(),
+            is_torrent: false, name: "test.txt".into(), status: "complete".into(),
+            completed_length: 4, total_length: 4, download_speed: 0,
+            upload_speed: 0, path: String::new(), error: None,
+        };
+        let mut entries = BTreeMap::from([("done".to_string(), item.clone())]);
+        save_json(&path, &entries).unwrap();
+
+        // If writing the new snapshot fails, the in-memory and on-disk
+        // history must both retain the entry, including on app shutdown.
+        let unwritable = folder.join("missing-parent").join("downloads.json");
+        assert!(forget_history_entry(&mut entries, "done", &unwritable).is_err());
+        assert_eq!(entries.get("done"), Some(&item));
+        assert!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
+            .unwrap().contains_key("done"));
+
+        // Active transfers must never be removed from history.
+        entries.get_mut("done").unwrap().status = "paused".into();
+        assert!(forget_history_entry(&mut entries, "done", &path).is_err());
+        entries.get_mut("done").unwrap().status = "complete".into();
+
+        forget_history_entry(&mut entries, "done", &path).unwrap();
+        assert!(!entries.contains_key("done"));
+        assert!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
+            .unwrap().is_empty());
+        fs::remove_dir_all(folder).unwrap();
+    }
+
     #[test]
     fn folder_open_requires_completed_existing_file() {
         let folder = std::env::temp_dir().join(format!("dm-folder-{}", uuid::Uuid::new_v4()));
