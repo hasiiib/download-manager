@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, fs, io::Write, net::TcpListener, path::PathBuf,
 use std::os::unix::fs::PermissionsExt;
 use tauri::State;
 
-#[derive(Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 struct Download {
     gid: String,
