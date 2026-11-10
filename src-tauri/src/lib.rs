@@ -616,6 +616,10 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
                 }
             }
         }
+        // Return only entries still present after concurrent Forget/Retry.
+        // Otherwise the backend would be correct but a stale UI poll could
+        // briefly bring an already-removed row back on screen.
+        updated.retain(|item| entries.contains_key(&item.gid));
         if changed {
             if let Ok(mut last_save) = engine.last_history_save.lock() {
                 if urgent || last_save.elapsed() >= Duration::from_secs(10) {
