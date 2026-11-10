@@ -36,7 +36,7 @@ This ordering is for implementation priority only. No requested feature is dropp
 - [ ] Start-at-login / tray support and recovery if application exits before scheduled time
 
 ## Media, RSS and sources (high priority)
-- [ ] yt-dlp and ffmpeg opt-in integration for video/audio, playlists and format selection
+- [ ] yt-dlp and ffmpeg integration: optional yt-dlp metadata inspection and single-item MP4/best-video/MP3 job launching implemented provisionally; playlist support, progress, cancellation, FFmpeg detection and persistent media jobs still pending
 - [ ] RSS subscriptions, filters and automatic episode/file downloads
 - [ ] HTTP link grabber and downloadable asset discovery
 - [ ] Cloud/service integrations and optional accounts where feasible
