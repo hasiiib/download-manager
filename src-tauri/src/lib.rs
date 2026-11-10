@@ -85,6 +85,15 @@ impl Default for Schedule {
     }
 }
 
+fn recover_schedule_after_restart(mut schedule: Schedule) -> Schedule {
+    if matches!(schedule.state.as_str(), "armed" | "running" | "power_pending") {
+        schedule.state = "cancelled".into();
+        schedule.power_at_unix = 0;
+        schedule.message = "App restarted; schedule cancelled for safety. Restored aria2 downloads may resume immediately. Re-arm the schedule if needed.".into();
+    }
+    schedule
+}
+
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -480,13 +489,11 @@ impl Engine {
         fs::set_permissions(&data_dir, fs::Permissions::from_mode(0o700))?;
         let settings = load_validated_settings(&data_dir.join("settings.json"))?;
         let mut schedule: Schedule = load_json(&data_dir.join("schedule.json"))?.unwrap_or_default();
-        // A crash or reboot must not unexpectedly power off the machine after
-        // launch. Require the user to explicitly arm again for power actions.
-        if matches!(schedule.state.as_str(), "power_pending" | "running") {
-            schedule.state = "cancelled".into();
-            schedule.power_at_unix = 0;
-            schedule.message = "Schedule was interrupted when the app closed. Arm it again.".into();
-        }
+        // A recovered aria2 session may begin downloading immediately, before
+        // an armed start time. Cancel all in-flight schedules on app restart so
+        // neither premature queue starts nor delayed power actions are implied
+        // to be protected by a schedule that no longer owns the process.
+        schedule = recover_schedule_after_restart(schedule);
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
         let media_history: BTreeMap<String, MediaJob> =
@@ -2357,6 +2364,19 @@ mod tests {
         assert_eq!(aria2_server_connections(1), 1);
         assert_eq!(aria2_server_connections(16), 16);
         assert_eq!(aria2_server_connections(32), 16);
+    }
+
+    #[test]
+    fn restart_cancels_armed_and_power_pending_schedules() {
+        for state in ["armed", "running", "power_pending"] {
+            let schedule = Schedule { state: state.into(), power_at_unix: 44, ..Schedule::default() };
+            let restored = recover_schedule_after_restart(schedule);
+            assert_eq!(restored.state, "cancelled");
+            assert_eq!(restored.power_at_unix, 0);
+            assert!(restored.message.contains("restarted"));
+        }
+        let completed = Schedule { state: "completed".into(), ..Schedule::default() };
+        assert_eq!(recover_schedule_after_restart(completed).state, "completed");
     }
 
     #[test]
