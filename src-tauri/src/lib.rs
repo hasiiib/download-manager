@@ -105,7 +105,7 @@ fn scheduled_terminal_state(status: &str) -> bool {
     matches!(status, "complete" | "error" | "removed")
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MediaJob {
     id: String,
@@ -113,9 +113,48 @@ struct MediaJob {
     status: String,
     format: String,
     error: Option<String>,
+    #[serde(default)]
     progress: Option<f32>,
+    #[serde(default)]
     speed: String,
+    #[serde(default)]
     eta: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaTools {
+    yt_dlp: Option<String>,
+    ffmpeg: Option<String>,
+}
+
+fn optional_tool_version(exe: &str, option: &str) -> Option<String> {
+    let output = Command::new(exe).arg(option)
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
+        .output().ok()?;
+    if !output.status.success() { return None; }
+    String::from_utf8_lossy(&output.stdout)
+        .lines().next().map(|line| line.chars().take(120).collect())
+}
+
+#[tauri::command]
+async fn media_tools_status() -> Result<MediaTools, String> {
+    tokio::task::spawn_blocking(|| MediaTools {
+        yt_dlp: optional_tool_version("yt-dlp", "--version"),
+        ffmpeg: optional_tool_version("ffmpeg", "-version"),
+    }).await.map_err(|error| error.to_string())
+}
+
+fn restore_media_jobs(mut jobs: BTreeMap<String, MediaJob>) -> BTreeMap<String, MediaJob> {
+    for job in jobs.values_mut() {
+        if job.status == "downloading" {
+            job.status = "interrupted".into();
+            job.error = Some("Download Manager restarted. Retry to continue using yt-dlp's partial files.".into());
+            job.speed.clear();
+            job.eta.clear();
+        }
+    }
+    jobs
 }
 
 #[derive(Serialize)]
@@ -324,6 +363,8 @@ impl Engine {
         }
         settings.validate()?;
         fs::create_dir_all(&settings.download_dir)?;
+        let media_history: BTreeMap<String, MediaJob> =
+            restore_media_jobs(load_json(&data_dir.join("media_jobs.json"))?.unwrap_or_default());
         let mut history: BTreeMap<String, Download> = load_json(&data_dir.join("downloads.json"))?.unwrap_or_default();
         // A process restart may invalidate an old aria2 GID. Avoid showing stale speed.
         for download in history.values_mut() {
@@ -381,7 +422,7 @@ impl Engine {
             client,
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             token, child: Mutex::new(child), downloads: Mutex::new(history),
-            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(BTreeMap::new())), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
+            settings: Mutex::new(settings), schedule: Mutex::new(schedule), media_jobs: Arc::new(Mutex::new(media_history)), media_cancellations: Arc::new(Mutex::new(BTreeMap::new())), data_dir,
             last_history_save: Mutex::new(Instant::now() - Duration::from_secs(10)),
         })
     }
@@ -423,6 +464,11 @@ impl Engine {
     fn shutdown(&self) {
         // Exit callbacks run even when managed Tauri state outlives the app.
         // This is idempotent: Drop may call it after RunEvent::Exit.
+        if let Ok(jobs) = self.media_jobs.lock() {
+            if let Err(error) = save_json(&self.data_dir.join("media_jobs.json"), &*jobs) {
+                eprintln!("Unable to persist media history on exit: {error}");
+            }
+        }
         if let Ok(entries) = self.downloads.lock() {
             if let Err(error) = save_json(&self.data_dir.join("downloads.json"), &*entries) {
                 eprintln!("Unable to save download history during shutdown: {error}");
@@ -1092,6 +1138,21 @@ fn cancel_media_download(engine: State<'_, Engine>, id: String) -> Result<(), St
 }
 
 #[tauri::command]
+fn retry_media_download(engine: State<'_, Engine>, id: String) -> Result<MediaJob, String> {
+    let original = {
+        let jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+        let job = jobs.get(&id).ok_or("Unknown media download")?;
+        if !matches!(job.status.as_str(), "error" | "cancelled" | "interrupted") {
+            return Err("Only failed, cancelled or interrupted media downloads can be retried".into());
+        }
+        job.clone()
+    };
+    // Existing partial files remain on disk, letting yt-dlp resume where the
+    // server and media format support it. The old history record is preserved.
+    start_media_download(engine, original.title, original.format)
+}
+
+#[tauri::command]
 fn start_media_download(engine: State<'_, Engine>, source: String, format: String) -> Result<MediaJob, String> {
     media_http_url(&source)?;
     let args = media_format_args(&format)?;
@@ -1110,13 +1171,19 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         id: id.clone(), title: source, status: "downloading".into(),
         format, error: None, progress: None, speed: String::new(), eta: String::new(),
     };
-    engine.media_jobs.lock().map_err(|error| error.to_string())?
-        .insert(id.clone(), job.clone());
+    {
+        let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+        jobs.insert(id.clone(), job.clone());
+        if let Err(error) = save_json(&engine.data_dir.join("media_jobs.json"), &*jobs) {
+            eprintln!("Media launched, but its history could not be persisted: {error}");
+        }
+    }
     let stop = Arc::new(AtomicBool::new(false));
     engine.media_cancellations.lock().map_err(|error| error.to_string())?
         .insert(id.clone(), Arc::clone(&stop));
     let jobs = Arc::clone(&engine.media_jobs);
     let cancellations = Arc::clone(&engine.media_cancellations);
+    let media_history_path = engine.data_dir.join("media_jobs.json");
     let reader_jobs = Arc::clone(&jobs);
     let reader_id = id.clone();
     let progress_reader = child.stdout.take().map(|output| std::thread::spawn(move || {
@@ -1172,6 +1239,11 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
                         }
                     }
                 }
+            }
+        }
+        if let Ok(entries) = jobs.lock() {
+            if let Err(error) = save_json(&media_history_path, &*entries) {
+                eprintln!("Unable to persist completed media job: {error}");
             }
         }
         if let Ok(mut entries) = cancellations.lock() { entries.remove(&id); }
@@ -1664,6 +1736,21 @@ mod tests {
     }
 
     #[test]
+    fn media_restart_marks_in_flight_jobs_interrupted() {
+        let job = MediaJob {
+            id: "one".into(), title: "https://example.org/video".into(),
+            status: "downloading".into(), format: "mp4".into(),
+            error: None, progress: Some(20.0), speed: "4MiB/s".into(), eta: "00:30".into(),
+        };
+        let jobs = restore_media_jobs(BTreeMap::from([("one".into(), job)]));
+        assert_eq!(jobs["one"].status, "interrupted");
+        assert!(jobs["one"].speed.is_empty());
+        let serialized = serde_json::to_string(&jobs).unwrap();
+        let parsed: BTreeMap<String, MediaJob> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(parsed["one"].format, "mp4");
+    }
+
+    #[test]
     fn parses_only_bounded_media_progress_lines() {
         let (percentage, speed, eta) = parse_media_progress("DM_PROGRESS: 42.5%|2.3MiB/s|00:12").unwrap();
         assert_eq!(percentage, 42.5);
@@ -1861,7 +1948,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, cancel_media_download, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, media_tools_status, list_media_jobs
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
