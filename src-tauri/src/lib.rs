@@ -462,6 +462,20 @@ impl Engine {
 
 impl Engine {
     fn shutdown(&self) {
+        // Request cancellation for every media worker this app started. Each
+        // worker owns and reaps its yt-dlp child. Do not target processes by
+        // executable name, as they might belong to other applications.
+        if let Ok(cancellations) = self.media_cancellations.lock() {
+            for flag in cancellations.values() { flag.store(true, Ordering::Release); }
+        }
+        // Give worker threads a bounded window to reap and checkpoint. Avoid
+        // waiting forever on a misbehaving helper during desktop shutdown.
+        for _ in 0..15 {
+            let pending = self.media_cancellations.lock()
+                .map(|entries| !entries.is_empty()).unwrap_or(false);
+            if !pending { break; }
+            std::thread::sleep(Duration::from_millis(200));
+        }
         // Exit callbacks run even when managed Tauri state outlives the app.
         // This is idempotent: Drop may call it after RunEvent::Exit.
         if let Ok(jobs) = self.media_jobs.lock() {
