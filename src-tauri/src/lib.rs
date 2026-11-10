@@ -127,6 +127,8 @@ struct MediaJob {
     current_item: String,
     #[serde(default)]
     playlist_index: Option<u32>,
+    #[serde(default)]
+    overall_progress: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -1256,6 +1258,16 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
 
 // yt-dlp's dedicated progress template is intentionally narrow; no terminal
 // escapes, arbitrary log text, or unbounded captured output is kept in memory.
+fn playlist_overall_progress(selected: &[u32], index: Option<u32>, percent: f32) -> Option<f32> {
+    let index = index?;
+    if selected.is_empty() || !percent.is_finite() || !(0.0..=100.0).contains(&percent) {
+        return None;
+    }
+    let position = selected.iter().position(|item| *item == index)?;
+    let total = selected.len() as f32;
+    Some(((position as f32 + percent / 100.0) / total * 100.0).min(100.0))
+}
+
 fn parse_media_progress(line: &str) -> Option<(f32, String, String, String, Option<u32>)> {
     let raw = line.trim().strip_prefix("DM_PROGRESS:")?;
     let mut parts = raw.splitn(5, '|');
@@ -1361,7 +1373,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let job = MediaJob {
         id: id.clone(), title: source, status: "downloading".into(),
         format, playlist, playlist_items, error: None, progress: None, speed: String::new(), eta: String::new(),
-        current_item: String::new(), playlist_index: None,
+        current_item: String::new(), playlist_index: None, overall_progress: None,
     };
     {
         let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
@@ -1381,6 +1393,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let media_history_path = engine.data_dir.join("media_jobs.json");
     let reader_jobs = Arc::clone(&jobs);
     let reader_id = id.clone();
+    let selected_for_progress = job.playlist_items.clone();
     let progress_reader = child.stdout.take().map(|output| std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break };
@@ -1393,6 +1406,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
                             entry.eta = eta;
                             entry.current_item = current_item;
                             entry.playlist_index = playlist_index;
+                            entry.overall_progress = playlist_overall_progress(&selected_for_progress, playlist_index, progress);
                         }
                     }
                 }
@@ -1965,6 +1979,15 @@ mod tests {
     }
 
     #[test]
+    fn calculates_overall_progress_only_when_playlist_selection_is_known() {
+        assert_eq!(playlist_overall_progress(&[1,3,8], Some(3), 50.0), Some(50.0));
+        assert_eq!(playlist_overall_progress(&[1,3,8], Some(8), 100.0), Some(100.0));
+        assert_eq!(playlist_overall_progress(&[], Some(1), 50.0), None);
+        assert_eq!(playlist_overall_progress(&[1,3], Some(2), 10.0), None);
+        assert_eq!(playlist_overall_progress(&[1,3], None, 10.0), None);
+    }
+
+    #[test]
     fn playlist_selection_has_unique_bounded_one_based_indexes() {
         assert!(validate_playlist_items(&[], false).is_ok());
         assert!(validate_playlist_items(&[1, 3, 50], true).is_ok());
@@ -1984,7 +2007,7 @@ mod tests {
             id: "pause".into(), title: "https://example.org/watch".into(),
             status: "paused".into(), format: "mp4".into(), playlist: false,
             playlist_items: vec![], error: None, progress: Some(12.0), speed: String::new(), eta: String::new(),
-            current_item: String::new(), playlist_index: None,
+            current_item: String::new(), playlist_index: None, overall_progress: None,
         })]);
         let resumed = restore_media_jobs(jobs);
         assert_eq!(resumed["pause"].status, "interrupted");
@@ -1996,7 +2019,7 @@ mod tests {
             id: "one".into(), title: "https://example.org/video".into(),
             status: "downloading".into(), format: "mp4".into(), playlist: true,
             playlist_items: vec![1, 3], error: None, progress: Some(20.0), speed: "4MiB/s".into(), eta: "00:30".into(),
-            current_item: String::new(), playlist_index: None,
+            current_item: String::new(), playlist_index: None, overall_progress: None,
         };
         let jobs = restore_media_jobs(BTreeMap::from([("one".into(), job)]));
         assert_eq!(jobs["one"].status, "interrupted");
