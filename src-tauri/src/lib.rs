@@ -167,6 +167,43 @@ struct MediaPreview {
     uploader: String,
     webpage_url: String,
     yt_dlp_version: String,
+    formats: Vec<MediaFormat>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaFormat {
+    id: String,
+    extension: String,
+    resolution: String,
+    note: String,
+    filesize: Option<u64>,
+}
+
+fn media_formats(info: &Value) -> Vec<MediaFormat> {
+    let Some(formats) = info.get("formats").and_then(Value::as_array) else { return vec![] };
+    formats.iter().filter_map(|entry| {
+        let id = entry.get("format_id")?.as_str()?;
+        if id.is_empty() || id.len() > 64 ||
+            !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
+            return None;
+        }
+        let clean = |field: &str| -> String {
+            entry.get(field).and_then(Value::as_str).unwrap_or("")
+                .chars().filter(|c| !c.is_control()).take(70).collect()
+        };
+        let resolution = clean("resolution");
+        let height = entry.get("height").and_then(Value::as_u64);
+        let resolution = if resolution.is_empty() {
+            height.map(|v| format!("{v}p")).unwrap_or_else(|| "Audio / unknown".into())
+        } else { resolution };
+        Some(MediaFormat {
+            id: id.to_string(), extension: clean("ext"),
+            resolution, note: clean("format_note"),
+            filesize: entry.get("filesize").or_else(|| entry.get("filesize_approx"))
+                .and_then(Value::as_u64),
+        })
+    }).take(80).collect()
 }
 
 fn media_http_url(source: &str) -> Result<(), String> {
@@ -183,15 +220,27 @@ fn media_http_url(source: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn media_format_args(format: &str) -> Result<Vec<&'static str>, String> {
-    match format {
-        "best" => Ok(vec!["-f", "bv*+ba/b", "--merge-output-format", "mkv"]),
-        "mp4" => Ok(vec!["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4"]),
-        "audio" => Ok(vec!["-x", "--audio-format", "mp3"]),
-        "720p" => Ok(vec!["-f", "bv*[height<=720]+ba/b[height<=720]", "--merge-output-format", "mkv"]),
-        "1080p" => Ok(vec!["-f", "bv*[height<=1080]+ba/b[height<=1080]", "--merge-output-format", "mkv"]),
-        _ => Err("Select Best, MP4, MP3 audio, 720p or 1080p".into()),
+fn media_format_args(format: &str) -> Result<Vec<String>, String> {
+    let known: Option<Vec<&str>> = match format {
+        "best" => Some(vec!["-f", "bv*+ba/b", "--merge-output-format", "mkv"]),
+        "mp4" => Some(vec!["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4"]),
+        "audio" => Some(vec!["-x", "--audio-format", "mp3"]),
+        "720p" => Some(vec!["-f", "bv*[height<=720]+ba/b[height<=720]", "--merge-output-format", "mkv"]),
+        "1080p" => Some(vec!["-f", "bv*[height<=1080]+ba/b[height<=1080]", "--merge-output-format", "mkv"]),
+        _ => None,
+    };
+    if let Some(parts) = known {
+        return Ok(parts.into_iter().map(str::to_string).collect());
     }
+    // Format IDs come from yt-dlp metadata. Permit only narrow identifiers;
+    // never allow arbitrary selectors/command arguments from the frontend.
+    if let Some(id) = format.strip_prefix("id:") {
+        if !id.is_empty() && id.len() <= 64 &&
+            id.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.')) {
+            return Ok(vec!["-f".into(), id.to_string()]);
+        }
+    }
+    Err("Choose a supported preset or an inspected format ID".into())
 }
 
 struct Engine {
@@ -1130,6 +1179,7 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
             uploader: info.get("uploader").and_then(Value::as_str).unwrap_or("").chars().take(200).collect(),
             webpage_url: info.get("webpage_url").and_then(Value::as_str).unwrap_or("").chars().take(4096).collect(),
             yt_dlp_version: String::from_utf8_lossy(&version.stdout).trim().chars().take(64).collect(),
+            formats: media_formats(&info),
         })
     }).await.map_err(|error| error.to_string())?;
     result
@@ -1789,6 +1839,21 @@ mod tests {
     }
 
     #[test]
+    fn preview_formats_filter_untrusted_ids_and_cap_result_count() {
+        let info = json!({"formats": [
+            {"format_id": "137", "ext": "mp4", "height": 1080, "filesize": 12345},
+            {"format_id": "-exec", "ext": "mp4"},
+            {"format_id": "best+audio", "ext": "mp4"},
+            {"format_id": "251", "ext": "webm", "resolution": "audio only"}
+        ]});
+        let found = media_formats(&info);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].id, "137");
+        assert_eq!(found[0].filesize, Some(12345));
+        assert_eq!(found[1].resolution, "audio only");
+    }
+
+    #[test]
     fn media_helper_rejects_unsafe_sources_and_formats() {
         assert!(media_http_url("https://example.org/watch?v=1").is_ok());
         assert!(media_http_url("http://example.org/video").is_ok());
@@ -1802,6 +1867,10 @@ mod tests {
         assert!(media_format_args("audio").is_ok());
         assert!(media_format_args("720p").is_ok());
         assert!(media_format_args("1080p").is_ok());
+        assert_eq!(media_format_args("id:137").unwrap(), vec!["-f", "137"]);
+        assert!(media_format_args("id:bestvideo+bestaudio").is_err());
+        assert!(media_format_args("id:--exec").is_err());
+        assert!(media_format_args("id:").is_err());
         assert!(media_format_args("--exec").is_err());
     }
 
