@@ -112,6 +112,8 @@ struct MediaJob {
     title: String,
     status: String,
     format: String,
+    #[serde(default)]
+    playlist: bool,
     error: Option<String>,
     #[serde(default)]
     progress: Option<f32>,
@@ -186,7 +188,9 @@ fn media_format_args(format: &str) -> Result<Vec<&'static str>, String> {
         "best" => Ok(vec!["-f", "bv*+ba/b", "--merge-output-format", "mkv"]),
         "mp4" => Ok(vec!["-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b", "--merge-output-format", "mp4"]),
         "audio" => Ok(vec!["-x", "--audio-format", "mp3"]),
-        _ => Err("Select Best quality, MP4 or MP3 audio".into()),
+        "720p" => Ok(vec!["-f", "bv*[height<=720]+ba/b[height<=720]/b", "--merge-output-format", "mkv"]),
+        "1080p" => Ok(vec!["-f", "bv*[height<=1080]+ba/b[height<=1080]/b", "--merge-output-format", "mkv"]),
+        _ => Err("Select Best, MP4, MP3 audio, 720p or 1080p".into()),
     }
 }
 
@@ -1163,17 +1167,24 @@ fn retry_media_download(engine: State<'_, Engine>, id: String) -> Result<MediaJo
     };
     // Existing partial files remain on disk, letting yt-dlp resume where the
     // server and media format support it. The old history record is preserved.
-    start_media_download(engine, original.title, original.format)
+    start_media_download(engine, original.title, original.format, original.playlist)
 }
 
 #[tauri::command]
-fn start_media_download(engine: State<'_, Engine>, source: String, format: String) -> Result<MediaJob, String> {
+fn start_media_download(engine: State<'_, Engine>, source: String, format: String, playlist: bool) -> Result<MediaJob, String> {
     media_http_url(&source)?;
     let args = media_format_args(&format)?;
     let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
     let mut command = Command::new("yt-dlp");
-    command.args(["--ignore-config", "--no-playlist", "--newline", "--no-color", "--no-overwrites", "--restrict-filenames"]);
+    command.args(["--ignore-config", "--newline", "--no-color", "--no-overwrites", "--restrict-filenames"]);
+    if playlist {
+        // Bound playlist size; downloading arbitrary thousands of remote entries
+        // should require separate explicit batches.
+        command.args(["--yes-playlist", "--playlist-end", "50"]);
+    } else {
+        command.arg("--no-playlist");
+    }
     command.args(["--progress-template", "download:DM_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s"]);
     command.args(args);
     command.arg("-P").arg(&output_folder);
@@ -1183,7 +1194,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let id = uuid::Uuid::new_v4().to_string();
     let job = MediaJob {
         id: id.clone(), title: source, status: "downloading".into(),
-        format, error: None, progress: None, speed: String::new(), eta: String::new(),
+        format, playlist, error: None, progress: None, speed: String::new(), eta: String::new(),
     };
     {
         let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
@@ -1753,7 +1764,7 @@ mod tests {
     fn media_restart_marks_in_flight_jobs_interrupted() {
         let job = MediaJob {
             id: "one".into(), title: "https://example.org/video".into(),
-            status: "downloading".into(), format: "mp4".into(),
+            status: "downloading".into(), format: "mp4".into(), playlist: true,
             error: None, progress: Some(20.0), speed: "4MiB/s".into(), eta: "00:30".into(),
         };
         let jobs = restore_media_jobs(BTreeMap::from([("one".into(), job)]));
@@ -1762,6 +1773,7 @@ mod tests {
         let serialized = serde_json::to_string(&jobs).unwrap();
         let parsed: BTreeMap<String, MediaJob> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(parsed["one"].format, "mp4");
+        assert!(parsed["one"].playlist);
     }
 
     #[test]
@@ -1788,6 +1800,8 @@ mod tests {
         assert!(media_format_args("best").is_ok());
         assert!(media_format_args("mp4").is_ok());
         assert!(media_format_args("audio").is_ok());
+        assert!(media_format_args("720p").is_ok());
+        assert!(media_format_args("1080p").is_ok());
         assert!(media_format_args("--exec").is_err());
     }
 
