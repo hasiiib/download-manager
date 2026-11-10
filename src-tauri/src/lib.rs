@@ -956,6 +956,28 @@ fn forget_history_entry(
     Ok(())
 }
 
+// Remove completed history records atomically; downloaded files are untouched.
+fn clear_completed_history(
+    entries: &mut BTreeMap<String, Download>,
+    path: &std::path::Path,
+) -> Result<usize, String> {
+    let completed = entries.values().filter(|item| item.status == "complete").count();
+    if completed == 0 {
+        return Ok(0);
+    }
+    let mut next = entries.clone();
+    next.retain(|_, item| item.status != "complete");
+    save_json(path, &next)?;
+    *entries = next;
+    Ok(completed)
+}
+
+#[tauri::command]
+fn clear_completed_downloads(engine: State<'_, Engine>) -> Result<usize, String> {
+    let mut entries = engine.downloads.lock().map_err(|error| error.to_string())?;
+    clear_completed_history(&mut entries, &engine.data_dir.join("downloads.json"))
+}
+
 #[tauri::command]
 fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String> {
     let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
@@ -1083,6 +1105,38 @@ mod tests {
         assert!(!may_insert_polled_gid("still-live", &original));
         // aria2 follow-up GIDs discovered by the poll are still accepted.
         assert!(may_insert_polled_gid("new-torrent-child", &original));
+    }
+
+    #[test]
+    fn clear_completed_only_removes_history_and_is_atomic() {
+        let folder = std::env::temp_dir().join(format!("dm-clear-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("downloads.json");
+        let make = |gid: &str, status: &str| Download {
+            gid: gid.into(), source: "https://example.org/file".into(),
+            is_torrent: false, name: gid.into(), status: status.into(),
+            completed_length: 0, total_length: 10, download_speed: 0,
+            upload_speed: 0, path: String::new(), error: None,
+        };
+        let mut entries = BTreeMap::from([
+            ("done".into(), make("done", "complete")),
+            ("paused".into(), make("paused", "paused")),
+            ("error".into(), make("error", "error")),
+        ]);
+        save_json(&path, &entries).unwrap();
+        let unwritable = folder.join("missing").join("downloads.json");
+        assert!(clear_completed_history(&mut entries, &unwritable).is_err());
+        assert!(entries.contains_key("done"));
+        assert!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
+            .unwrap().contains_key("done"));
+        assert_eq!(clear_completed_history(&mut entries, &path).unwrap(), 1);
+        assert!(!entries.contains_key("done"));
+        assert!(entries.contains_key("paused"));
+        assert!(entries.contains_key("error"));
+        assert_eq!(clear_completed_history(&mut entries, &path).unwrap(), 0);
+        assert_eq!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
+            .unwrap().len(), 2);
+        fs::remove_dir_all(folder).unwrap();
     }
 
     #[test]
@@ -1242,7 +1296,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder
+            add_download, add_batch, retry_download, list_downloads, control_download, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
