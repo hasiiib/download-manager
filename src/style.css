@@ -238,3 +238,10 @@
 .feed-subscription button{border:1px solid #80536a;color:#ffd1df;background:#3a273c;padding:7px 9px;font-size:10px;border-radius:7px;cursor:pointer}
 .feed-subscription button:disabled{opacity:.6;cursor:wait}
 @media(max-width:620px){.feed-subscription{align-items:flex-start;flex-wrap:wrap}}
+
+/* Overrides the generic .modal label column layout for checkbox controls. */
+.media-modal label.media-playlist-toggle{display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:10px;margin:12px 0 16px}
+.media-modal label.media-playlist-toggle input[type=checkbox]{padding:0;margin:0;width:16px;height:16px}
+.media-modal label.media-playlist-toggle span{display:inline;line-height:1.45}
+.media-modal select{font:inherit;font-size:13px;background:#101729!important;color:#ecedff!important;cursor:pointer}
+.media-modal .media-job-list small{overflow-wrap:anywhere;white-space:normal;line-height:1.5}
