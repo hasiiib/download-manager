@@ -231,7 +231,7 @@ async fn inspect_playlist(source: String) -> Result<PlaylistPreview, String> {
     media_http_url(&source)?;
     tokio::task::spawn_blocking(move || {
         let output = Command::new("yt-dlp")
-            .args(["--ignore-config", "--flat-playlist", "--playlist-end", "50",
+            .args(["--ignore-config", "--js-runtimes", "node", "--flat-playlist", "--playlist-end", "50",
                 "--dump-single-json", "--no-warnings", "--no-call-home"])
             .arg("--").arg(&source)
             .stdin(Stdio::null()).output()
@@ -1243,7 +1243,7 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
             .map_err(|_| "yt-dlp not found. Install it yourself before using Video downloader.".to_string())?;
         if !version.status.success() { return Err("yt-dlp could not start".into()); }
         let output = Command::new("yt-dlp")
-            .args(["--ignore-config", "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--no-call-home"])
+            .args(["--ignore-config", "--js-runtimes", "node", "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--no-call-home"])
             .arg("--").arg(&source)
             .stdin(Stdio::null()).output()
             .map_err(|error| format!("Could not inspect media: {error}"))?;
@@ -1614,7 +1614,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         // are paused and stopped together, not left running in the background.
         command.process_group(0);
     }
-    command.args(["--ignore-config", "--newline", "--no-color", "--no-overwrites", "--restrict-filenames"]);
+    command.args(["--ignore-config", "--js-runtimes", "node", "--newline", "--no-color", "--no-overwrites", "--restrict-filenames"]);
     if playlist {
         // Bound playlist size; downloading arbitrary thousands of remote entries
         // should require separate explicit batches.
