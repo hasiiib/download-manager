@@ -237,7 +237,7 @@ async fn inspect_playlist(source: String) -> Result<PlaylistPreview, String> {
             .stdin(Stdio::null()).output()
             .map_err(|_| "yt-dlp missing or could not inspect the playlist".to_string())?;
         if !output.status.success() {
-            return Err("Playlist inspection failed; confirm the URL is a supported public playlist".into());
+            return Err(media_inspect_error(&output.stderr, &source, "Playlist inspection failed"));
         }
         if output.stdout.len() > 2_000_000 { return Err("Playlist metadata is too large".into()); }
         let info: Value = serde_json::from_slice(&output.stdout)
@@ -1248,7 +1248,7 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
             .stdin(Stdio::null()).output()
             .map_err(|error| format!("Could not inspect media: {error}"))?;
         if !output.status.success() {
-            return Err("Media inspection failed. Check the URL and whether the site is supported.".into());
+            return Err(media_inspect_error(&output.stderr, &source, "Media inspection failed"));
         }
         if output.stdout.len() > 2_000_000 {
             return Err("Media metadata is too large".into());
@@ -1532,6 +1532,18 @@ fn parse_media_progress(line: &str) -> Option<(f32, String, String, String, Opti
     let index = parts.next().and_then(|value| value.trim().parse::<u32>().ok())
         .filter(|index| (1..=50).contains(index));
     Some((percent, speed, eta, item, index))
+}
+
+fn media_inspect_error(stderr: &[u8], source: &str, fallback: &str) -> String {
+    // Metadata inspection can emit untrusted multiline output. Limit the
+    // retained diagnostics and redact the original URL before displaying.
+    let tail = if stderr.len() > 12_000 { &stderr[stderr.len()-12_000..] } else { stderr };
+    let lines = String::from_utf8_lossy(tail);
+    let lines: Vec<String> = lines.lines().rev().take(12)
+        .map(|line| line.chars().take(350).collect()).collect();
+    let summary = media_error_summary(&lines, source);
+    if summary.is_empty() { fallback.to_string() }
+    else { format!("{fallback}: {summary}") }
 }
 
 // Retain just a few yt-dlp diagnostic lines, not unlimited third-party output.
@@ -2340,6 +2352,17 @@ mod tests {
         let parsed: BTreeMap<String, MediaJob> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(parsed["one"].format, "mp4");
         assert!(parsed["one"].playlist);
+    }
+
+    #[test]
+    fn media_inspection_error_explains_unavailable_videos() {
+        let source = "https://www.youtube.com/watch?v=secret123";
+        let error = media_inspect_error(
+            format!("ERROR: [youtube] This video is unavailable: {source}").as_bytes(),
+            source, "Media inspection failed");
+        assert!(error.contains("video is unavailable"));
+        assert!(!error.contains("secret123"));
+        assert!(error.contains("[media URL]"));
     }
 
     #[test]
