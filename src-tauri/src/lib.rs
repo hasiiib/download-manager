@@ -1534,6 +1534,20 @@ fn parse_media_progress(line: &str) -> Option<(f32, String, String, String, Opti
     Some((percent, speed, eta, item, index))
 }
 
+// Retain just a few yt-dlp diagnostic lines, not unlimited third-party output.
+// The source URL may contain private query tokens, so redact it in the UI.
+fn media_error_summary(lines: &[String], source: &str) -> String {
+    let mut picked: Vec<String> = lines.iter()
+        .filter(|line| line.contains("ERROR:") || line.contains("WARNING:"))
+        .rev().take(4).cloned().collect();
+    if picked.is_empty() {
+        picked = lines.iter().rev().take(2).cloned().collect();
+    }
+    picked.reverse();
+    picked.join(" | ").replace(source, "[media URL]")
+        .chars().filter(|ch| !ch.is_control()).take(900).collect()
+}
+
 #[tauri::command]
 fn cancel_media_download(engine: State<'_, Engine>, id: String) -> Result<(), String> {
     let cancellations = engine.media_cancellations.lock().map_err(|error| error.to_string())?;
@@ -1616,7 +1630,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     command.args(args);
     command.arg("-P").arg(&output_folder);
     command.arg("--").arg(&source);
-    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
+    let mut child = command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|_| "yt-dlp is missing or could not launch. Install yt-dlp and FFmpeg to enable media downloads.".to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let job = MediaJob {
@@ -1643,6 +1657,18 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let reader_jobs = Arc::clone(&jobs);
     let reader_id = id.clone();
     let selected_for_progress = job.playlist_items.clone();
+    let stderr_reader = child.stderr.take().map(|output| std::thread::spawn(move || {
+        let mut recent: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+        for line in BufReader::new(output).lines() {
+            let Ok(line) = line else { break };
+            let trimmed: String = line.trim().chars().filter(|ch| !ch.is_control())
+                .take(350).collect();
+            if trimmed.is_empty() { continue; }
+            if recent.len() >= 12 { recent.pop_front(); }
+            recent.push_back(trimmed);
+        }
+        recent.into_iter().collect::<Vec<_>>()
+    }));
     let progress_reader = child.stdout.take().map(|output| std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break };
@@ -1706,6 +1732,9 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
             }
         };
         if let Some(reader) = progress_reader { let _ = reader.join(); }
+        let diagnostics = stderr_reader
+            .and_then(|reader| reader.join().ok())
+            .unwrap_or_default();
         if let Ok(mut entries) = jobs.lock() {
             if let Some(entry) = entries.get_mut(&id) {
                 if cancelled {
@@ -1722,7 +1751,12 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
                         }
                         Ok(status) => {
                             entry.status = "error".into();
-                            entry.error = Some(format!("yt-dlp exited with {status}. Check whether FFmpeg is installed or the source is supported."));
+                            let detail = media_error_summary(&diagnostics, &entry.title);
+                            entry.error = Some(if detail.is_empty() {
+                                format!("yt-dlp exited with {status}. Try Inspect media or run yt-dlp in Terminal for details.")
+                            } else {
+                                format!("yt-dlp exited with {status}: {detail}")
+                            });
                         }
                         Err(error) => {
                             entry.status = "error".into();
@@ -2306,6 +2340,20 @@ mod tests {
         let parsed: BTreeMap<String, MediaJob> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(parsed["one"].format, "mp4");
         assert!(parsed["one"].playlist);
+    }
+
+    #[test]
+    fn media_diagnostics_show_error_and_redact_source_url() {
+        let source = "https://example.com/watch?private=token";
+        let lines = vec![
+            "WARNING: older note".into(),
+            format!("ERROR: Unsupported URL: {source}"),
+        ];
+        let summary = media_error_summary(&lines, source);
+        assert!(summary.contains("ERROR: Unsupported URL"));
+        assert!(summary.contains("[media URL]"));
+        assert!(!summary.contains("private=token"));
+        assert!(media_error_summary(&[], source).is_empty());
     }
 
     #[test]
