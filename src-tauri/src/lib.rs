@@ -226,7 +226,6 @@ fn validate_playlist_items(items: &[u32], playlist: bool) -> Result<(), String> 
     Ok(())
 }
 
-#[tauri::command]
 // A user-managed pipx install is often newer than Ubuntu's apt package.
 // Prefer it explicitly because desktop launchers may not include ~/.local/bin in PATH.
 fn yt_dlp_command() -> Command {
@@ -238,6 +237,7 @@ fn yt_dlp_command() -> Command {
     }
 }
 
+#[tauri::command]
 async fn inspect_playlist(source: String) -> Result<PlaylistPreview, String> {
     media_http_url(&source)?;
     tokio::task::spawn_blocking(move || {
