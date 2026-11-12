@@ -2672,7 +2672,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs, forget_media_job, clear_media_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
