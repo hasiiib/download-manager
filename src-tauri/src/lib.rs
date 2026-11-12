@@ -1202,10 +1202,11 @@ mod torrent_selection_tests {
 }
 
 #[tauri::command]
-async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction: String) -> Result<(), String> {
+async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction: String, position: Option<u32>) -> Result<(), String> {
     let position = match direction.as_str() {
         "top" => 0,
         "bottom" => 0,
+        "position" => position.filter(|p| *p <= 100_000).ok_or("Invalid queue position")?,
         _ => return Err("Unknown queue action".into()),
     };
     if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
@@ -1215,7 +1216,7 @@ async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction:
     if live.get("status").and_then(Value::as_str) != Some("waiting") {
         return Err("Only waiting downloads can be moved in the queue".into());
     }
-    let how = if direction == "top" { "POS_SET" } else { "POS_END" };
+    let how = if direction == "bottom" { "POS_END" } else { "POS_SET" };
     engine.rpc("changePosition", vec![json!(gid), json!(position), json!(how)]).await?;
     let _ = engine.rpc("saveSession", vec![]).await;
     Ok(())
