@@ -130,6 +130,8 @@ export default function App() {
   const [scheduleConcurrency, setScheduleConcurrency] = useState(3);
   const [scheduleAction, setScheduleAction] = useState<Schedule["afterComplete"]>("none");
   const [scheduleError, setScheduleError] = useState("");
+  const [queueOrder, setQueueOrder] = useState<string[]>([]);
+  const [draggedQueueId, setDraggedQueueId] = useState<string | null>(null);
 
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [torrentDialog, setTorrentDialog] = useState<DownloadItem | null>(null);
@@ -517,6 +519,24 @@ export default function App() {
     finally { setMediaBusy(false); }
   };
 
+  const waitingQueue = items.filter(item => item.status === "waiting");
+  const orderedQueue = [...waitingQueue].sort((a, b) => {
+    const ai = queueOrder.indexOf(a.gid), bi = queueOrder.indexOf(b.gid);
+    return (ai < 0 ? Number.MAX_SAFE_INTEGER : ai) - (bi < 0 ? Number.MAX_SAFE_INTEGER : bi);
+  });
+  const reorderWaiting = async (gid: string, target: number) => {
+    const oldIndex = orderedQueue.findIndex(item => item.gid === gid);
+    if (oldIndex < 0 || target < 0 || target >= orderedQueue.length || oldIndex === target) return;
+    setScheduleError("");
+    try {
+      await invoke("move_queued_download", { gid, direction: "position", position: target });
+      const ids = orderedQueue.map(item => item.gid);
+      ids.splice(oldIndex, 1); ids.splice(target, 0, gid);
+      setQueueOrder(ids);
+      await refresh();
+    } catch (error) { setScheduleError(String(error)); }
+  };
+
   const armSchedule = async () => {
     const start = new Date(scheduleStart).getTime();
     if (!Number.isFinite(start) || start <= Date.now()) {
@@ -707,7 +727,20 @@ export default function App() {
       <section className="modal schedule-modal" role="dialog" aria-modal="true" aria-label="Schedule downloads">
         <div className="modal-title"><div><Clock3 size={22}/><h2>Download scheduler</h2></div><button aria-label="Close scheduler" onClick={() => setScheduleOpen(false)}><X size={18}/></button></div>
         <p>Schedule the active, queued and paused downloads already in your list. Keep Download Manager running until the jobs complete.</p>
-        <label><span>Start time (your local timezone)</span><input type="datetime-local" value={scheduleStart} onChange={event => setScheduleStart(event.target.value)}/></label>
+        <div className="scheduler-priority" aria-label="Waiting download priority">
+           <strong>Download priority</strong><p>Drag waiting downloads into order, or use the arrows. First item starts first when a slot is available. Active and paused transfers cannot be reordered here.</p>
+           {orderedQueue.length === 0 && <small>No waiting downloads to prioritize.</small>}
+           {orderedQueue.map((item, index) => <div key={item.gid} className="priority-item" draggable
+             onDragStart={event => { setDraggedQueueId(item.gid); event.dataTransfer.effectAllowed = "move"; }}
+             onDragOver={event => event.preventDefault()}
+             onDrop={event => { event.preventDefault(); if (draggedQueueId) void reorderWaiting(draggedQueueId, index); setDraggedQueueId(null); }}
+             onDragEnd={() => setDraggedQueueId(null)}>
+             <span>☰ {index + 1}. {item.name}</span>
+             <button type="button" disabled={index === 0} aria-label={"Move " + item.name + " up"} onClick={() => void reorderWaiting(item.gid, index - 1)}>↑</button>
+             <button type="button" disabled={index === orderedQueue.length - 1} aria-label={"Move " + item.name + " down"} onClick={() => void reorderWaiting(item.gid, index + 1)}>↓</button>
+           </div>)}
+         </div>
+         <label><span>Start time (your local timezone)</span><input type="datetime-local" value={scheduleStart} onChange={event => setScheduleStart(event.target.value)}/></label>
         <label><span>Maximum simultaneous downloads</span><input type="number" min="1" max="10" value={scheduleConcurrency} onChange={event => setScheduleConcurrency(Number(event.target.value))}/></label>
         <label><span>After all scheduled downloads finish successfully</span><select value={scheduleAction} onChange={event => setScheduleAction(event.target.value as Schedule["afterComplete"])}><option value="none">Do nothing</option><option value="shutdown">Shut down computer</option><option value="sleep">Put computer to sleep</option></select></label>
         {scheduleAction !== "none" && <div className="schedule-warning">This can interrupt unsaved work in other applications. Power action is attempted only if every scheduled transfer completes successfully, with a 60-second cancellation window. Keep the app running. Your desktop may require permission.</div>}
