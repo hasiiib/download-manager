@@ -106,7 +106,7 @@ export default function App() {
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
-  const [mediaHistoryOpen, setMediaHistoryOpen] = useState(true);
+  const [newDownloadOpen, setNewDownloadOpen] = useState(false);
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaFormat, setMediaFormat] = useState("mp4");
   const [mediaPlaylist, setMediaPlaylist] = useState(false);
@@ -223,6 +223,7 @@ export default function App() {
       setQuery("");
       setMessage("Download added. Showing all downloads.");
       setUrl("");
+      setNewDownloadOpen(false);
       await refresh();
     } catch (err) { setMessage(String(err)); }
     finally { setWorking(false); }
@@ -512,6 +513,7 @@ export default function App() {
       setMediaJobs(jobs => [...jobs, job]);
       setMediaHistoryOpen(true);
       setMediaOpen(false);
+      setNewDownloadOpen(false);
       setUrl("");
       setMediaPreview(null);
       setMediaError("Media download started. Files will be saved in " + (settings.downloadDir || "your downloads folder") + ".");
@@ -597,8 +599,13 @@ export default function App() {
     });
     return visible;
   }, [items, filter, query, sortOrder]);
+  const visibleMedia = mediaJobs.filter(job =>
+    (filter === "all" || filter === "active" && ["downloading","paused","queued"].includes(job.status) ||
+     filter === "complete" && ["complete","completed"].includes(job.status) ||
+     filter === "error" && ["error","cancelled","interrupted"].includes(job.status)) &&
+    (job.title.toLowerCase().includes(query.toLowerCase()) || job.id.toLowerCase().includes(query.toLowerCase())));
   const active = items.filter(d => d.status === "active").length;
-  const done = items.filter(d => d.status === "complete").length;
+  const done = items.filter(d => d.status === "complete").length + mediaJobs.filter(j => ["complete","completed"].includes(j.status)).length;
   const speed = items.reduce((sum, item) => sum + (item.status === "active" ? item.downloadSpeed : 0), 0);
 
   return <div className="shell">
@@ -606,6 +613,9 @@ export default function App() {
       <button type="button" className="brand brand-toggle" aria-label={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarExpanded} onClick={() => setSidebarExpanded(expanded => !expanded)} title={sidebarExpanded ? "Collapse sidebar" : "Expand sidebar"}>
         <span className="brand-icon"><ArrowDownToLine size={22} /></span>
         {sidebarExpanded && <span className="brand-copy"><strong>Download<span>Manager</span></strong><small>YOUR DOWNLOAD HUB</small></span>}
+      </button>
+      <button type="button" className="nav nav-new-download" title="New download" onClick={() => { setFilter("all"); setNewDownloadOpen(true); }}>
+        <span className="nav-icon"><Plus size={18}/></span>{sidebarExpanded && <span className="nav-name">New download</span>}
       </button>
       {sidebarExpanded && <div className="nav-label">WORKSPACE</div>}
       {([
@@ -635,38 +645,33 @@ export default function App() {
 
       <section className="heading"><div><div className="eyebrow"><Zap size={14} /> DOWNLOADS, UNDER CONTROL</div><h1>{viewTitles[filter]}<span>.</span></h1><p>{viewDescriptions[filter]}</p></div></section>
       {filter === "all" && <section className="stats">
-        <div className="stat"><div className="stat-icon violet"><HardDrive size={21}/></div><div><small>All downloads</small><strong>{items.length}</strong></div></div>
-        <div className="stat"><div className="stat-icon blue"><Download size={21}/></div><div><small>Downloading</small><strong>{active}</strong></div></div>
+        <div className="stat"><div className="stat-icon violet"><HardDrive size={21}/></div><div><small>All downloads</small><strong>{items.length + mediaJobs.length}</strong></div></div>
+        <div className="stat"><div className="stat-icon blue"><Download size={21}/></div><div><small>Downloading</small><strong>{active + mediaJobs.filter(j => j.status === "downloading").length}</strong></div></div>
         <div className="stat"><div className="stat-icon green"><CheckCircle2 size={21}/></div><div><small>Completed</small><strong>{done}</strong></div></div>
         <div className="stat stat-speed"><div className="stat-icon violet"><Zap size={21}/></div><div><small>Total download speed</small><strong>{formatSize(speed)}/s</strong></div></div>
       </section>}
-      {filter === "all" && <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · VIDEO · AUDIO · MAGNET · TORRENT</span></div>
-        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a download or video link" /><button disabled={working || mediaBusy} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : looksLikeMedia ? "Choose video format" : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
-        {message && <p className={message.startsWith("Download added.") || message.endsWith("downloads queued.") ? "notice-success" : "error"} role="status">{message}</p>}
-        {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
-        <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
-      </section>}
-      {mediaJobs.length > 0 && <section className="list media-history" aria-label="Video and audio download history">
-         <div className="list-head"><div><h2>Video & audio downloads <span className="view-count">{mediaJobs.length}</span></h2><p>Media jobs remain visible after closing the video dialog.</p></div>
-           <button type="button" className="bulk-control" aria-expanded={mediaHistoryOpen} onClick={() => setMediaHistoryOpen(value => !value)}>{mediaHistoryOpen ? "Hide" : "Show"} history</button></div>
-         {mediaHistoryOpen && <div className="media-job-list">{[...mediaJobs].reverse().map(job => <div key={job.id}>
-           <span title={job.title}>{job.title}</span><strong>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>
-           {job.status === "downloading" && <button type="button" onClick={() => void controlMedia(job.id, "pause")}>Pause</button>}
-           {job.status === "paused" && <button type="button" onClick={() => void controlMedia(job.id, "resume")}>Resume</button>}
-           {["downloading","paused"].includes(job.status) && <button type="button" onClick={() => void cancelMedia(job.id)}>Cancel</button>}
-           {["error","cancelled","interrupted"].includes(job.status) && <button type="button" onClick={() => void retryMedia(job.id)}>Retry</button>}
-           {job.progress != null && <progress max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}
-           {job.error && <small>{job.error}</small>}
-         </div>)}</div>}
-       </section>}
        {!engineOnline && <p className="engine-notice" role="alert">{engineHealth}</p>}
       {message && filter !== "all" && <p className="engine-notice" role="status">{message}</p>}
       {refreshError && filter !== "all" && <p className="engine-notice" role="alert">Engine: {refreshError}</p>}
       {schedule && ["armed","running","power_pending"].includes(schedule.state) && <div className="schedule-banner" role="status"><div><strong>{schedule.state === "armed" ? "Scheduled" : schedule.state === "running" ? "Schedule running" : "Power action pending"}</strong><span>{schedule.message}</span><small>{schedule.state === "armed" ? "Starts " + new Date(schedule.startAtUnix * 1000).toLocaleString() : schedule.state === "power_pending" ? "Power action at " + new Date(schedule.powerAtUnix * 1000).toLocaleTimeString() : "Monitoring " + schedule.gids.length + " transfers"}</small></div><button type="button" disabled={working} onClick={() => void cancelSchedule()}>Cancel schedule</button></div>}
       {actionFeedback && <div className="action-feedback" role="status"><span>{actionFeedback}</span><button type="button" aria-label="Dismiss notification" onClick={() => setActionFeedback("")}><X size={14}/></button></div>}
-      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setFeedError(""); setFeedOpen(true); }} title="Inspect RSS/Atom feed and queue links"><Link2 size={14}/> RSS feed</button><button type="button" className="bulk-control" onClick={() => { setMediaError(""); setMediaOpen(true); }} title="Download video or audio using optional yt-dlp"><Video size={14}/> Video</button><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
-        {shown.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
-          <div className="rows">{shown.map(item => <article className="row" key={item.gid}>
+      <section className="list" aria-label={viewTitles[filter]}><div className="list-head"><div><h2>{viewTitles[filter]} <span className="view-count">{shown.length + visibleMedia.length}</span></h2><p>{filter === "all" ? "Pause, resume and monitor active transfers" : viewDescriptions[filter]}</p></div><div className="list-tools"><button type="button" className="bulk-control" onClick={() => { setFeedError(""); setFeedOpen(true); }} title="Inspect RSS/Atom feed and queue links"><Link2 size={14}/> RSS feed</button><button type="button" className="bulk-control" onClick={() => { setMediaError(""); setMediaOpen(true); }} title="Download video or audio using optional yt-dlp"><Video size={14}/> Video</button><button type="button" className="bulk-control" onClick={() => { setScheduleError(""); setScheduleConcurrency(settings.concurrent); setScheduleOpen(true); }} title="Schedule existing downloads"><Clock3 size={14}/> Scheduler</button>{items.some(item => item.status === "active" || item.status === "waiting") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("pause")} title="Pause all active and queued downloads"><Pause size={14}/> Pause all</button>}{items.some(item => item.status === "paused") && <button type="button" className="bulk-control" disabled={working} onClick={() => void controlAll("resume")} title="Resume all paused downloads"><Play size={14}/> Resume all</button>}{done > 0 && (filter === "all" || filter === "complete") && <button type="button" className="clear-completed" onClick={() => setConfirmClearCompleted(true)} title="Remove completed downloads from history; keep downloaded files"><Trash2 size={14}/> Clear completed</button>}<details className="sort-menu"><summary aria-label={"Sort downloads: " + sortOrder}>Sort: {{ default: "Recent", name: "Name", size: "File size", progress: "Progress" }[sortOrder]} <span aria-hidden="true">▾</span></summary><div className="sort-options">{([["default","Recent"],["name","Name"],["size","File size"],["progress","Progress"]] as const).map(([key,label]) => <button type="button" key={key} aria-pressed={sortOrder === key} onClick={event => { setSortOrder(key); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{label}</button>)}</div></details><div className="search"><Search size={17}/><input aria-label="Search downloads" placeholder="Search downloads" value={query} onChange={e => setQuery(e.target.value)} /></div></div></div>
+        {shown.length === 0 && visibleMedia.length === 0 ? <div className="empty"><div><ArrowDownToLine size={30}/></div><h3>{query ? "No matching downloads" : filter === "all" ? "No downloads here yet" : "No " + viewTitles[filter].toLowerCase() + " downloads"}</h3><p>{query ? "Try a different search or clear the search field." : filter === "all" ? "Add a URL, magnet link or torrent to get started." : "There are no downloads in this category."}</p>{(filter !== "all" || query) && <button className="clear-filter" onClick={() => { setFilter("all"); setQuery(""); }}>Show all downloads</button>}</div> :
+          <div className="rows">{visibleMedia.map(job => <article className="row" key={"media-" + job.id}>
+            <div className="file-icon"><Video size={20}/></div>
+            <div className="file-info"><strong title={job.title}>{job.title}</strong>
+              <small>{job.format.toUpperCase()} · Video / audio{job.error ? " · " + job.error : ""}</small>
+              <div className="progress"><span style={{width: (["complete","completed"].includes(job.status) ? 100 : job.progress || 0) + "%"}} /></div>
+            </div>
+            <div className="row-meta"><span className={"status " + job.status}><StatusIcon status={job.status === "downloading" ? "active" : job.status === "completed" ? "complete" : job.status}/>{job.status}</span>
+              <small>{job.progress == null ? "" : Math.round(job.progress) + "%"} {job.speed}</small></div>
+            <div className="row-actions">
+              {job.status === "downloading" && <button type="button" onClick={() => void controlMedia(job.id,"pause")}>Pause</button>}
+              {job.status === "paused" && <button type="button" onClick={() => void controlMedia(job.id,"resume")}>Resume</button>}
+              {["downloading","paused"].includes(job.status) && <button type="button" onClick={() => void cancelMedia(job.id)}>Cancel</button>}
+              {["error","cancelled","interrupted"].includes(job.status) && <button type="button" onClick={() => void retryMedia(job.id)}>Retry</button>}
+            </div>
+          </article>)}{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
             <div className="file-info"><strong title={item.source}>{item.name}</strong><small title={item.error || item.path || item.source}>{item.error || item.path || item.source}</small><div className="progress"><span style={{ width: item.status === "complete" ? "100%" : item.totalLength ? Math.min(100, item.completedLength / item.totalLength * 100) + "%" : "0%" }} /></div></div>
             <div className="row-meta"><span className={"status " + item.status}><StatusIcon status={item.status}/> {item.status}</span>
@@ -700,6 +705,13 @@ export default function App() {
         <div className="modal-actions"><button type="button" onClick={() => setFeedOpen(false)}>Close</button><button type="button" disabled={feedBusy || !feedPreview || feedSelection.length === 0} onClick={() => void addFeedEntries()}>{feedBusy ? "Queueing..." : "Queue selected links"}</button></div>
       </section>
     </div>}
+      {newDownloadOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setNewDownloadOpen(false); }}><section className="modal media-modal add-box" role="dialog" aria-modal="true" aria-label="New download"><div className="modal-title"><div><Plus size={20}/><h2>New download</h2></div><button type="button" aria-label="Close new download" onClick={() => setNewDownloadOpen(false)}><X size={18}/></button></div><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · VIDEO · AUDIO · MAGNET · TORRENT</span></div>
+        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a download or video link" /><button disabled={working || mediaBusy} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : looksLikeMedia ? "Choose video format" : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
+        {message && <p className={message.startsWith("Download added.") || message.endsWith("downloads queued.") ? "notice-success" : "error"} role="status">{message}</p>}
+        {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
+        <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
+      </section></div>}
+
     {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
       <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
         <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
