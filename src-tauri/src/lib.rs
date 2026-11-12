@@ -160,7 +160,9 @@ fn optional_tool_version(exe: &str, option: &str) -> Option<String> {
 #[tauri::command]
 async fn media_tools_status() -> Result<MediaTools, String> {
     tokio::task::spawn_blocking(|| MediaTools {
-        yt_dlp: optional_tool_version("yt-dlp", "--version"),
+        yt_dlp: yt_dlp_command().arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
+            .output().ok().filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8_lossy(&output.stdout).lines().next().map(str::to_owned)),
         ffmpeg: optional_tool_version("ffmpeg", "-version"),
     }).await.map_err(|error| error.to_string())
 }
