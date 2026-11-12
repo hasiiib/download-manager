@@ -227,10 +227,21 @@ fn validate_playlist_items(items: &[u32], playlist: bool) -> Result<(), String> 
 }
 
 #[tauri::command]
+// A user-managed pipx install is often newer than Ubuntu's apt package.
+// Prefer it explicitly because desktop launchers may not include ~/.local/bin in PATH.
+fn yt_dlp_command() -> Command {
+    let user_binary = home().join(".local/bin/yt-dlp");
+    if user_binary.is_file() {
+        Command::new(user_binary)
+    } else {
+        Command::new("yt-dlp")
+    }
+}
+
 async fn inspect_playlist(source: String) -> Result<PlaylistPreview, String> {
     media_http_url(&source)?;
     tokio::task::spawn_blocking(move || {
-        let output = Command::new("yt-dlp")
+        let output = yt_dlp_command()
             .args(["--ignore-config", "--js-runtimes", "node", "--flat-playlist", "--playlist-end", "50",
                 "--dump-single-json", "--no-warnings", "--no-call-home"])
             .arg("--").arg(&source)
@@ -1238,11 +1249,11 @@ async fn preview_media(source: String) -> Result<MediaPreview, String> {
     media_http_url(&source)?;
     // yt-dlp is an optional system dependency, never silently downloaded.
     let result = tokio::task::spawn_blocking(move || {
-        let version = Command::new("yt-dlp").arg("--version")
+        let version = yt_dlp_command().arg("--version")
             .stdin(Stdio::null()).output()
             .map_err(|_| "yt-dlp not found. Install it yourself before using Video downloader.".to_string())?;
         if !version.status.success() { return Err("yt-dlp could not start".into()); }
-        let output = Command::new("yt-dlp")
+        let output = yt_dlp_command()
             .args(["--ignore-config", "--js-runtimes", "node", "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings", "--no-call-home"])
             .arg("--").arg(&source)
             .stdin(Stdio::null()).output()
@@ -1618,7 +1629,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let args = media_format_args(&format)?;
     let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
-    let mut command = Command::new("yt-dlp");
+    let mut command = yt_dlp_command();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
