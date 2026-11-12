@@ -245,3 +245,12 @@
 .media-modal label.media-playlist-toggle span{display:inline;line-height:1.45}
 .media-modal select{font:inherit;font-size:13px;background:#101729!important;color:#ecedff!important;cursor:pointer}
 .media-modal .media-job-list small{overflow-wrap:anywhere;white-space:normal;line-height:1.5}
+
+/* Unified media history and scheduler queue priority */
+.media-history { margin-bottom: 18px; }
+.media-history .media-job-list { padding: 12px 18px 18px; }
+.scheduler-priority { margin: 14px 0; padding: 12px; border: 1px solid var(--border, #424653); border-radius: 10px; }
+.scheduler-priority p { font-size: 12px; opacity: .8; }
+.priority-item { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid #5555; cursor: grab; }
+.priority-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.priority-item button { min-width: 32px; cursor: pointer; }
