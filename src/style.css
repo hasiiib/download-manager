@@ -245,3 +245,50 @@
 .media-modal label.media-playlist-toggle span{display:inline;line-height:1.45}
 .media-modal select{font:inherit;font-size:13px;background:#101729!important;color:#ecedff!important;cursor:pointer}
 .media-modal .media-job-list small{overflow-wrap:anywhere;white-space:normal;line-height:1.5}
+
+/* Unified media history and scheduler queue priority */
+.media-history { margin-bottom: 18px; }
+.media-history .media-job-list { padding: 12px 18px 18px; }
+.scheduler-priority { margin: 14px 0; padding: 12px; border: 1px solid var(--border, #424653); border-radius: 10px; }
+.scheduler-priority p { font-size: 12px; opacity: .8; }
+.priority-item { display: flex; gap: 8px; align-items: center; padding: 8px; border-bottom: 1px solid #5555; cursor: grab; }
+.priority-item span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.priority-item button { min-width: 32px; cursor: pointer; }
+
+/* Compact floating feedback instead of a full-width download-list banner. */
+.toast-notification {
+  position: fixed;
+  right: 20px;
+  bottom: 22px;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(390px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid #464d70;
+  border-radius: 12px;
+  background: #242842;
+  color: #f0f2ff;
+  box-shadow: 0 12px 34px #0008;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  animation: toast-in .18s ease-out;
+}
+.toast-notification button {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: #b6bfd7;
+  cursor: pointer;
+  padding: 3px;
+}
+.toast-notification button:hover { color: white; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-notification { animation: none; }
+}

@@ -160,7 +160,9 @@ fn optional_tool_version(exe: &str, option: &str) -> Option<String> {
 #[tauri::command]
 async fn media_tools_status() -> Result<MediaTools, String> {
     tokio::task::spawn_blocking(|| MediaTools {
-        yt_dlp: optional_tool_version("yt-dlp", "--version"),
+        yt_dlp: yt_dlp_command().arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
+            .output().ok().filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8_lossy(&output.stdout).lines().next().map(str::to_owned)),
         ffmpeg: optional_tool_version("ffmpeg", "-version"),
     }).await.map_err(|error| error.to_string())
 }
@@ -1202,10 +1204,11 @@ mod torrent_selection_tests {
 }
 
 #[tauri::command]
-async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction: String) -> Result<(), String> {
+async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction: String, position: Option<u32>) -> Result<(), String> {
     let position = match direction.as_str() {
         "top" => 0,
         "bottom" => 0,
+        "position" => position.filter(|p| *p <= 100_000).ok_or("Invalid queue position")?,
         _ => return Err("Unknown queue action".into()),
     };
     if !engine.downloads.lock().map_err(|e| e.to_string())?.contains_key(&gid) {
@@ -1215,7 +1218,7 @@ async fn move_queued_download(engine: State<'_, Engine>, gid: String, direction:
     if live.get("status").and_then(Value::as_str) != Some("waiting") {
         return Err("Only waiting downloads can be moved in the queue".into());
     }
-    let how = if direction == "top" { "POS_SET" } else { "POS_END" };
+    let how = if direction == "bottom" { "POS_END" } else { "POS_SET" };
     engine.rpc("changePosition", vec![json!(gid), json!(position), json!(how)]).await?;
     let _ = engine.rpc("saveSession", vec![]).await;
     Ok(())
@@ -1237,6 +1240,31 @@ async fn check_engine(engine: State<'_, Engine>) -> Result<String, String> {
 
 fn save_schedule(engine: &Engine, schedule: &Schedule) -> Result<(), String> {
     save_json(&engine.data_dir.join("schedule.json"), schedule)
+}
+
+#[tauri::command]
+fn forget_media_job(engine: State<'_, Engine>, id: String) -> Result<(), String> {
+    let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+    let job = jobs.get(&id).ok_or("Media job not found")?;
+    if matches!(job.status.as_str(), "downloading" | "paused" | "queued") {
+        return Err("Stop this media download before removing its history".into());
+    }
+    let mut updated = jobs.clone();
+    updated.remove(&id);
+    save_json(&engine.data_dir.join("media_jobs.json"), &updated)?;
+    *jobs = updated;
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_media_history(engine: State<'_, Engine>) -> Result<usize, String> {
+    let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+    let mut updated = jobs.clone();
+    updated.retain(|_, job| matches!(job.status.as_str(), "downloading" | "paused" | "queued"));
+    let removed = jobs.len() - updated.len();
+    save_json(&engine.data_dir.join("media_jobs.json"), &updated)?;
+    *jobs = updated;
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -2644,7 +2672,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs, forget_media_job, clear_media_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
