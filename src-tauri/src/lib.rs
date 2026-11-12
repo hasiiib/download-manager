@@ -1243,6 +1243,31 @@ fn save_schedule(engine: &Engine, schedule: &Schedule) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn forget_media_job(engine: State<'_, Engine>, id: String) -> Result<(), String> {
+    let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+    let job = jobs.get(&id).ok_or("Media job not found")?;
+    if matches!(job.status.as_str(), "downloading" | "paused" | "queued") {
+        return Err("Stop this media download before removing its history".into());
+    }
+    let mut updated = jobs.clone();
+    updated.remove(&id);
+    save_json(&engine.data_dir.join("media_jobs.json"), &updated)?;
+    *jobs = updated;
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_media_history(engine: State<'_, Engine>) -> Result<usize, String> {
+    let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+    let mut updated = jobs.clone();
+    updated.retain(|_, job| matches!(job.status.as_str(), "downloading" | "paused" | "queued"));
+    let removed = jobs.len() - updated.len();
+    save_json(&engine.data_dir.join("media_jobs.json"), &updated)?;
+    *jobs = updated;
+    Ok(removed)
+}
+
+#[tauri::command]
 fn list_media_jobs(engine: State<'_, Engine>) -> Result<Vec<MediaJob>, String> {
     Ok(engine.media_jobs.lock().map_err(|error| error.to_string())?.values().cloned().collect())
 }
