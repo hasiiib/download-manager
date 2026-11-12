@@ -106,6 +106,7 @@ export default function App() {
   const [draft, setDraft] = useState<Settings>(defaults);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [mediaHistoryOpen, setMediaHistoryOpen] = useState(true);
   const [mediaUrl, setMediaUrl] = useState("");
   const [mediaFormat, setMediaFormat] = useState("mp4");
   const [mediaPlaylist, setMediaPlaylist] = useState(false);
@@ -203,8 +204,15 @@ export default function App() {
     } catch (err) { setMessage(String(err)); }
   };
 
+  const looksLikeMedia = /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com)\//i.test(url.trim());
+  const openMediaFromLink = () => {
+    setMediaUrl(url.trim()); setMediaPreview(null); setPlaylistPreview(null);
+    setMediaError(""); setMediaOpen(true);
+  };
+
   const add = async () => {
     if (!url.trim()) { setMessage("Paste a URL, magnet link or full path to a .torrent/.meta4 file."); return; }
+    if (looksLikeMedia) { openMediaFromLink(); return; }
     setMessage("");
     setWorking(true);
     try {
@@ -343,7 +351,6 @@ export default function App() {
   }, [mediaOpen]);
 
   useEffect(() => {
-    if (!mediaOpen) return;
     let mounted = true;
     const poll = () => {
       void invoke<MediaJob[]>("list_media_jobs")
@@ -353,7 +360,7 @@ export default function App() {
     poll();
     const timer = window.setInterval(poll, 1500);
     return () => { mounted = false; window.clearInterval(timer); };
-  }, [mediaOpen]);
+  }, []);
 
   const retryMedia = async (id: string) => {
     setMediaError("");
@@ -501,6 +508,9 @@ export default function App() {
         playlistItems: mediaPlaylist && playlistPreview ? selectedPlaylistItems : [],
       });
       setMediaJobs(jobs => [...jobs, job]);
+      setMediaHistoryOpen(true);
+      setMediaOpen(false);
+      setUrl("");
       setMediaPreview(null);
       setMediaError("Media download started. Files will be saved in " + (settings.downloadDir || "your downloads folder") + ".");
     } catch (error) { setMediaError(String(error)); }
@@ -610,13 +620,26 @@ export default function App() {
         <div className="stat"><div className="stat-icon green"><CheckCircle2 size={21}/></div><div><small>Completed</small><strong>{done}</strong></div></div>
         <div className="stat stat-speed"><div className="stat-icon violet"><Zap size={21}/></div><div><small>Total download speed</small><strong>{formatSize(speed)}/s</strong></div></div>
       </section>}
-      {filter === "all" && <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · FTP · MAGNET · TORRENT · METALINK</span></div>
-        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a link, magnet:? URL or /path/to/file.torrent" /><button disabled={working} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
+      {filter === "all" && <section className="add-box"><div className="section-title"><div><Link2 size={18}/><h2>New download</h2></div><span>HTTP · HTTPS · VIDEO · AUDIO · MAGNET · TORRENT</span></div>
+        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a download or video link" /><button disabled={working || mediaBusy} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : looksLikeMedia ? "Choose video format" : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
         {message && <p className={message.startsWith("Download added.") || message.endsWith("downloads queued.") ? "notice-success" : "error"} role="status">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
         <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
       </section>}
-      {!engineOnline && <p className="engine-notice" role="alert">{engineHealth}</p>}
+      {mediaJobs.length > 0 && <section className="list media-history" aria-label="Video and audio download history">
+         <div className="list-head"><div><h2>Video & audio downloads <span className="view-count">{mediaJobs.length}</span></h2><p>Media jobs remain visible after closing the video dialog.</p></div>
+           <button type="button" className="bulk-control" aria-expanded={mediaHistoryOpen} onClick={() => setMediaHistoryOpen(value => !value)}>{mediaHistoryOpen ? "Hide" : "Show"} history</button></div>
+         {mediaHistoryOpen && <div className="media-job-list">{[...mediaJobs].reverse().map(job => <div key={job.id}>
+           <span title={job.title}>{job.title}</span><strong>{job.status}{job.progress != null ? " · " + Math.round(job.progress) + "%" : ""}</strong>
+           {job.status === "downloading" && <button type="button" onClick={() => void controlMedia(job.id, "pause")}>Pause</button>}
+           {job.status === "paused" && <button type="button" onClick={() => void controlMedia(job.id, "resume")}>Resume</button>}
+           {["downloading","paused"].includes(job.status) && <button type="button" onClick={() => void cancelMedia(job.id)}>Cancel</button>}
+           {["error","cancelled","interrupted"].includes(job.status) && <button type="button" onClick={() => void retryMedia(job.id)}>Retry</button>}
+           {job.progress != null && <progress max={100} value={job.progress} aria-label={"Progress for " + job.title}/>}
+           {job.error && <small>{job.error}</small>}
+         </div>)}</div>}
+       </section>}
+       {!engineOnline && <p className="engine-notice" role="alert">{engineHealth}</p>}
       {message && filter !== "all" && <p className="engine-notice" role="status">{message}</p>}
       {refreshError && filter !== "all" && <p className="engine-notice" role="alert">Engine: {refreshError}</p>}
       {schedule && ["armed","running","power_pending"].includes(schedule.state) && <div className="schedule-banner" role="status"><div><strong>{schedule.state === "armed" ? "Scheduled" : schedule.state === "running" ? "Schedule running" : "Power action pending"}</strong><span>{schedule.message}</span><small>{schedule.state === "armed" ? "Starts " + new Date(schedule.startAtUnix * 1000).toLocaleString() : schedule.state === "power_pending" ? "Power action at " + new Date(schedule.powerAtUnix * 1000).toLocaleTimeString() : "Monitoring " + schedule.gids.length + " transfers"}</small></div><button type="button" disabled={working} onClick={() => void cancelSchedule()}>Cancel schedule</button></div>}
