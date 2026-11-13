@@ -2091,6 +2091,26 @@ fn clear_completed_history(
     Ok(completed)
 }
 
+// Clear only terminal direct-download records. Preserve active, queued and paused transfers.
+fn clear_finished_history(
+    entries: &mut BTreeMap<String, Download>,
+    path: &std::path::Path,
+) -> Result<usize, String> {
+    let mut next = entries.clone();
+    next.retain(|_, item| !matches!(item.status.as_str(), "complete" | "error" | "removed" | "interrupted"));
+    let removed = entries.len() - next.len();
+    if removed == 0 { return Ok(0); }
+    save_json(path, &next)?;
+    *entries = next;
+    Ok(removed)
+}
+
+#[tauri::command]
+fn clear_finished_downloads(engine: State<'_, Engine>) -> Result<usize, String> {
+    let mut entries = engine.downloads.lock().map_err(|error| error.to_string())?;
+    clear_finished_history(&mut entries, &engine.data_dir.join("downloads.json"))
+}
+
 #[tauri::command]
 fn clear_completed_downloads(engine: State<'_, Engine>) -> Result<usize, String> {
     let mut entries = engine.downloads.lock().map_err(|error| error.to_string())?;
@@ -2672,7 +2692,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs, forget_media_job, clear_media_history
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, clear_finished_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs, forget_media_job, clear_media_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")

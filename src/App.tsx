@@ -350,28 +350,13 @@ export default function App() {
       const removed = await invoke<number>("clear_media_history");
       const media = await invoke<MediaJob[]>("list_media_jobs");
       setMediaJobs(media);
-      const completed = await invoke<number>("clear_completed_downloads");
+      const completed = await invoke<number>("clear_finished_downloads");
       await refresh();
-      setActionFeedback(`${removed + completed} history entries cleared. Downloaded files were kept. Active media downloads were not removed.`);
+      setActionFeedback(`${removed + completed} history entries cleared. Files and active transfers were kept.`);
     } catch (error) { setActionFeedback(String(error)); }
     finally { setWorking(false); }
   };
 
-  const clearCompleted = async () => {
-    setWorking(true);
-    setActionFeedback("");
-    try {
-      const removed = await invoke<number>("clear_completed_downloads");
-      setConfirmClearCompleted(false);
-      await refresh();
-      setActionFeedback(removed + " completed history entr" + (removed === 1 ? "y" : "ies") + " cleared. Files were not deleted.");
-    } catch (error) {
-      setActionFeedback(String(error));
-      setConfirmClearCompleted(false);
-    } finally {
-      setWorking(false);
-    }
-  };
 
   useEffect(() => {
     if (!mediaOpen) return;
@@ -540,7 +525,6 @@ export default function App() {
         playlistItems: mediaPlaylist && playlistPreview ? selectedPlaylistItems : [],
       });
       setMediaJobs(jobs => [...jobs, job]);
-      setMediaHistoryOpen(true);
       setMediaOpen(false);
       setNewDownloadOpen(false);
       setUrl("");
@@ -795,7 +779,7 @@ export default function App() {
     {confirmClearCompleted && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setConfirmClearCompleted(false); }}>
       <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Clear completed download history" aria-describedby="clear-completed-explanation">
         <div className="modal-title"><div><Trash2 size={21}/><h2>Clear completed history?</h2></div><button aria-label="Close confirmation" type="button" onClick={() => setConfirmClearCompleted(false)}><X size={18}/></button></div>
-        <p id="clear-completed-explanation">Clear completed direct downloads and stopped media jobs from history? Active transfers and downloaded files will be kept. This cannot be undone.</p>
+        <p id="clear-completed-explanation">Clear completed, failed and cancelled history? Active or paused transfers and downloaded files will be kept. This cannot be undone.</p>
         <div className="modal-actions"><button type="button" onClick={() => setConfirmClearCompleted(false)}>Cancel</button><button type="button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(); }}>{working ? "Clearing..." : "Clear history only"}</button></div>
       </section>
     </div>}
