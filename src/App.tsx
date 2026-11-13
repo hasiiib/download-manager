@@ -357,21 +357,6 @@ export default function App() {
     finally { setWorking(false); }
   };
 
-  const clearCompleted = async () => {
-    setWorking(true);
-    setActionFeedback("");
-    try {
-      const removed = await invoke<number>("clear_completed_downloads");
-      setConfirmClearCompleted(false);
-      await refresh();
-      setActionFeedback(removed + " completed history entr" + (removed === 1 ? "y" : "ies") + " cleared. Files were not deleted.");
-    } catch (error) {
-      setActionFeedback(String(error));
-      setConfirmClearCompleted(false);
-    } finally {
-      setWorking(false);
-    }
-  };
 
   useEffect(() => {
     if (!mediaOpen) return;
@@ -540,7 +525,6 @@ export default function App() {
         playlistItems: mediaPlaylist && playlistPreview ? selectedPlaylistItems : [],
       });
       setMediaJobs(jobs => [...jobs, job]);
-      setMediaHistoryOpen(true);
       setMediaOpen(false);
       setNewDownloadOpen(false);
       setUrl("");
