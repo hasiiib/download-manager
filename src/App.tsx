@@ -122,6 +122,7 @@ export default function App() {
   const [mediaPreview, setMediaPreview] = useState<MediaPreview | null>(null);
   const [mediaJobs, setMediaJobs] = useState<MediaJob[]>([]);
   const [mediaTools, setMediaTools] = useState<MediaTools | null>(null);
+  const [mediaUpdateBusy, setMediaUpdateBusy] = useState(false);
   const [mediaBusy, setMediaBusy] = useState(false);
   const [mediaError, setMediaError] = useState("");
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -393,6 +394,21 @@ export default function App() {
     const timer = window.setInterval(poll, 1500);
     return () => { mounted = false; window.clearInterval(timer); };
   }, []);
+
+  const updateMediaTools = async () => {
+    setMediaUpdateBusy(true);
+    setMediaError("");
+    try {
+      const result = await invoke<string>("update_media_tools");
+      const status = await invoke<MediaTools>("media_tools_status");
+      setMediaTools(status);
+      setMediaError(result);
+    } catch (error) {
+      setMediaError(String(error));
+    } finally {
+      setMediaUpdateBusy(false);
+    }
+  };
 
   const retryMedia = async (id: string) => {
     setMediaError("");
@@ -746,7 +762,7 @@ export default function App() {
     {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
       <section className="modal media-modal" role="dialog" aria-modal="true" aria-label="Video and audio downloader">
         <div className="modal-title"><div><Video size={22}/><h2>Video & audio downloader</h2></div><button aria-label="Close media downloader" onClick={() => setMediaOpen(false)}><X size={18}/></button></div>
-        <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg. No software is auto-installed.</p>{mediaTools && <div className="media-tool-status" role="status"><span>yt-dlp: <b>{mediaTools.ytDlp ? "Installed (" + mediaTools.ytDlp + ")" : "Missing"}</b></span><span>FFmpeg: <b>{mediaTools.ffmpeg ? "Installed" : "Missing (needed for merging / MP3)"}</b></span></div>}
+        <p>Uses your installed yt-dlp. MP3 audio and video merging may require FFmpeg.</p>{mediaTools && <div className="media-tool-status" role="status"><span>yt-dlp: <b>{mediaTools.ytDlp ? "Installed (" + mediaTools.ytDlp + ")" : "Missing"}</b></span><span>FFmpeg: <b>{mediaTools.ffmpeg ? "Installed" : "Missing (needed for merging / MP3)"}</b></span><button type="button" disabled={mediaUpdateBusy} onClick={() => void updateMediaTools()}>{mediaUpdateBusy ? "Updating yt-dlp..." : "Update yt-dlp"}</button></div>}
         <label><span>Video or audio page URL (HTTP/HTTPS)</span><input type="url" value={mediaUrl} onChange={event => { setMediaUrl(event.target.value); setMediaPreview(null); setPlaylistPreview(null); setSelectedPlaylistItems([]); setMediaFormat("mp4"); }} placeholder="https://example.com/video"/></label>
         <div className="media-actions"><button type="button" disabled={mediaBusy || !mediaUrl.trim()} onClick={() => void inspectMedia()}>{mediaBusy ? "Working..." : "Inspect media"}</button></div>
         {mediaPreview && <div className="media-preview"><strong>{mediaPreview.title}</strong>{mediaPreview.uploader && <small>{mediaPreview.uploader}</small>}{mediaPreview.durationSeconds != null && <small>Duration: {Math.floor(mediaPreview.durationSeconds / 60)}m {Math.floor(mediaPreview.durationSeconds % 60)}s</small>}<small>yt-dlp {mediaPreview.ytDlpVersion}</small></div>}
