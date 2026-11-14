@@ -167,6 +167,48 @@ async fn media_tools_status() -> Result<MediaTools, String> {
     }).await.map_err(|error| error.to_string())
 }
 
+fn pipx_command() -> Command {
+    let user_binary = home().join(".local/bin/pipx");
+    if user_binary.is_file() {
+        Command::new(user_binary)
+    } else {
+        Command::new("pipx")
+    }
+}
+
+#[tauri::command]
+async fn update_media_tools() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        // Install into the current user's pipx environment. yt_dlp_command()
+        // already prefers ~/.local/bin/yt-dlp over distro-managed binaries.
+        let output = pipx_command()
+            .args(["install", "--force", "yt-dlp"])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|_| "pipx is not installed. Run: sudo apt install pipx && pipx ensurepath, then restart Download Manager.".to_string())?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            let detail: String = detail.chars().filter(|ch| !ch.is_control()).take(500).collect();
+            return Err(if detail.is_empty() {
+                "Could not update yt-dlp with pipx. Check your internet connection and pipx installation.".into()
+            } else {
+                format!("yt-dlp update failed: {detail}")
+            });
+        }
+        let version = yt_dlp_command()
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|result| result.status.success())
+            .and_then(|result| String::from_utf8_lossy(&result.stdout).lines().next().map(str::to_owned))
+            .unwrap_or_else(|| "unknown version".into());
+        Ok(format!("yt-dlp updated successfully ({version}). Retry the failed media download."))
+    }).await.map_err(|error| error.to_string())?
+}
+
 fn restore_media_jobs(mut jobs: BTreeMap<String, MediaJob>) -> BTreeMap<String, MediaJob> {
     for job in jobs.values_mut() {
         if matches!(job.status.as_str(), "downloading" | "paused") {
@@ -2672,7 +2714,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs, forget_media_job, clear_media_history
+            add_download, add_batch, retry_download, list_downloads, control_download, control_all_downloads, move_queued_download, get_torrent_files, get_torrent_info, select_torrent_files, forget_download, get_settings, save_settings, check_engine, open_download_folder, clear_completed_downloads, get_schedule, arm_schedule, cancel_schedule, preview_media, start_media_download, retry_media_download, cancel_media_download, control_media_download, media_tools_status, update_media_tools, inspect_playlist, inspect_feed, list_feed_subscriptions, subscribe_feed, set_feed_auto_download, remove_feed_subscription, list_media_jobs, forget_media_job, clear_media_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building Download Manager")
