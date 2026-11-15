@@ -1637,8 +1637,17 @@ fn media_error_summary(lines: &[String], source: &str) -> String {
         picked = lines.iter().rev().take(2).cloned().collect();
     }
     picked.reverse();
-    picked.join(" | ").replace(source, "[media URL]")
-        .chars().filter(|ch| !ch.is_control()).take(900).collect()
+    let summary: String = picked.join(" | ").replace(source, "[media URL]")
+        .chars().filter(|ch| !ch.is_control()).take(900).collect();
+
+    // YouTube periodically changes its delivery checks. A 403 is usually an
+    // extractor/session issue rather than a broken destination file, so give
+    // users a concrete recovery path without hiding yt-dlp's original error.
+    let lower = summary.to_ascii_lowercase();
+    if lower.contains("http error 403") || lower.contains("403 forbidden") {
+        summary.push_str(" | Recovery: update yt-dlp in Video tools, then retry. If it still fails, update yt-dlp to its latest nightly build and retry later; YouTube may temporarily reject automated requests.");
+    }
+    summary
 }
 
 #[tauri::command]
@@ -2458,6 +2467,17 @@ mod tests {
         assert!(summary.contains("[media URL]"));
         assert!(!summary.contains("private=token"));
         assert!(media_error_summary(&[], source).is_empty());
+    }
+
+    #[test]
+    fn youtube_403_diagnostic_includes_recovery_steps() {
+        let source = "https://www.youtube.com/watch?v=private";
+        let lines = vec!["ERROR: unable to download video data: HTTP Error 403: Forbidden".into()];
+        let summary = media_error_summary(&lines, source);
+        assert!(summary.contains("HTTP Error 403"));
+        assert!(summary.contains("update yt-dlp in Video tools"));
+        assert!(summary.contains("latest nightly build"));
+        assert!(!summary.contains("private"));
     }
 
     #[test]
