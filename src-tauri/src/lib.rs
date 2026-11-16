@@ -1637,7 +1637,7 @@ fn media_error_summary(lines: &[String], source: &str) -> String {
         picked = lines.iter().rev().take(2).cloned().collect();
     }
     picked.reverse();
-    let summary: String = picked.join(" | ").replace(source, "[media URL]")
+    let mut summary: String = picked.join(" | ").replace(source, "[media URL]")
         .chars().filter(|ch| !ch.is_control()).take(900).collect();
 
     // YouTube periodically changes its delivery checks. A 403 is usually an
