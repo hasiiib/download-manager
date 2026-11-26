@@ -35,6 +35,10 @@ struct Settings {
     #[serde(default)]
     seed_minutes: u16,
     download_dir: String,
+    #[serde(default = "default_category_extensions")]
+    category_extensions: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    category_directories: BTreeMap<String, String>,
     #[serde(default = "default_refresh_seconds")]
     refresh_seconds: u8,
     #[serde(default = "default_low_memory_mode")]
@@ -45,11 +49,21 @@ fn aria2_server_connections(requested: u8) -> u8 { requested.min(16) }
 fn default_min_split_size_mib() -> u8 { 1 }
 fn default_refresh_seconds() -> u8 { 3 }
 fn default_low_memory_mode() -> bool { true }
+fn default_category_extensions() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::from([
+        ("Compressed".into(), vec!["zip","7z","rar","tar","gz","bz2","xz","zst","tgz","iso","cab","lz","lzma"].into_iter().map(str::to_string).collect()),
+        ("Videos".into(), vec!["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpeg","mpg","3gp","ts","m2ts"].into_iter().map(str::to_string).collect()),
+        ("Audio".into(), vec!["mp3","m4a","aac","flac","wav","ogg","opus","wma","aiff"].into_iter().map(str::to_string).collect()),
+        ("Images".into(), vec!["jpg","jpeg","png","gif","webp","bmp","svg","tif","tiff","heic","avif"].into_iter().map(str::to_string).collect()),
+        ("Documents".into(), vec!["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","txt","rtf","epub","mobi"].into_iter().map(str::to_string).collect()),
+        ("Programs".into(), vec!["deb","rpm","appimage","exe","msi","dmg","apk","jar","sh"].into_iter().map(str::to_string).collect()),
+    ])
+}
 
 impl Settings {
     fn defaults() -> Self {
         let folder = home().join("Downloads");
-        Self { connections: 8, min_split_size_mib: default_min_split_size_mib(), concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned(),
+        Self { connections: 8, min_split_size_mib: default_min_split_size_mib(), concurrent: 3, speed_limit_kib: 0, seed_minutes: 0, download_dir: folder.to_string_lossy().into_owned(), category_extensions: default_category_extensions(), category_directories: BTreeMap::new(),
             refresh_seconds: default_refresh_seconds(), low_memory_mode: default_low_memory_mode() }
     }
     fn validate(&self) -> Result<(), String> {
@@ -57,6 +71,16 @@ impl Settings {
         if !(1..=64).contains(&self.min_split_size_mib) { return Err("Minimum segment size must be 1–64 MiB".into()); }
         if !(1..=10).contains(&self.concurrent) { return Err("Concurrent downloads must be 1–10".into()); }
         if self.download_dir.trim().is_empty() { return Err("Download folder cannot be empty".into()); }
+        if self.category_extensions.len() > 20 || self.category_directories.len() > 20 { return Err("Too many download categories".into()); }
+        for (category, extensions) in &self.category_extensions {
+            if category.is_empty() || category.len() > 32 || !category.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ') {
+                return Err("Invalid download category name".into());
+            }
+            if extensions.len() > 200 || extensions.iter().any(|ext| ext.is_empty() || ext.len() > 16 || !ext.chars().all(|c| c.is_ascii_alphanumeric())) {
+                return Err(format!("Invalid file extension in {category}"));
+            }
+        }
+        if self.category_directories.values().any(|dir| dir.len() > 4096) { return Err("Category directory path is too long".into()); }
         if !(1..=30).contains(&self.refresh_seconds) { return Err("Refresh interval must be 1–30 seconds".into()); }
         if self.speed_limit_kib > 1_048_576 { return Err("Speed limit must be no more than 1048576 KiB/s".into()); }
         Ok(())
@@ -752,12 +776,36 @@ fn is_metadata_file(path: &std::path::Path) -> bool {
         .map(|s| s.to_ascii_lowercase()).as_deref(), Some("torrent" | "meta4" | "metalink"))
 }
 
-async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
+fn download_extension(source: &str) -> Option<String> {
+    let raw_path = url::Url::parse(source).ok()
+        .and_then(|parsed| parsed.path_segments().and_then(|mut parts| parts.next_back()).map(str::to_string))
+        .or_else(|| std::path::Path::new(source).file_name().and_then(|name| name.to_str()).map(str::to_string))?;
+    std::path::Path::new(&raw_path).extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase())
+}
+
+fn category_download_dir(settings: &Settings, source: &str, override_dir: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(directory) = override_dir.filter(|value| !value.trim().is_empty()) { return Ok(PathBuf::from(directory.trim())); }
+    let base = PathBuf::from(&settings.download_dir);
+    let extension = download_extension(source);
+    let category = extension.as_deref().and_then(|ext| settings.category_extensions.iter()
+        .find(|(_, values)| values.iter().any(|value| value.trim_start_matches('.').eq_ignore_ascii_case(ext))))
+        .map(|(name, _)| name.as_str());
+    let Some(category) = category else { return Ok(base); };
+    if let Some(directory) = settings.category_directories.get(category).filter(|value| !value.trim().is_empty()) {
+        return Ok(PathBuf::from(directory.trim()));
+    }
+    if matches!(category, "Compressed" | "Videos") { return Ok(base.join(category)); }
+    Ok(base)
+}
+
+async fn enqueue(engine: &Engine, source: String, directory_override: Option<String>) -> Result<Download, String> {
     let input = source.trim();
     validate_source(input)?;
     let settings = engine.settings.lock().map_err(|e| e.to_string())?.clone();
+    let destination = category_download_dir(&settings, input, directory_override.as_deref())?;
+    fs::create_dir_all(&destination).map_err(|error| format!("Could not create download directory: {error}"))?;
     let mut opts = json!({
-        "dir": settings.download_dir,
+        "dir": destination.to_string_lossy(),
         "split": settings.connections.to_string(),
         "max-connection-per-server": aria2_server_connections(settings.connections).to_string(),
         "min-split-size": format!("{}M", settings.min_split_size_mib),
@@ -811,8 +859,8 @@ async fn enqueue(engine: &Engine, source: String) -> Result<Download, String> {
 }
 
 #[tauri::command]
-async fn add_download(engine: State<'_, Engine>, source: String) -> Result<Download, String> {
-    enqueue(&engine, source).await
+async fn add_download(engine: State<'_, Engine>, source: String, download_dir: Option<String>) -> Result<Download, String> {
+    enqueue(&engine, source, download_dir).await
 }
 
 #[derive(Serialize)]
@@ -829,7 +877,7 @@ async fn add_batch(engine: State<'_, Engine>, sources: Vec<String>) -> Result<Ba
     }
     let mut result = BatchResult { added: 0, errors: Vec::new() };
     for (index, source) in sources.into_iter().enumerate() {
-        match enqueue(&engine, source).await {
+        match enqueue(&engine, source, None).await {
             Ok(_) => result.added += 1,
             Err(error) => result.errors.push(format!("Line {}: {}", index + 1, error)),
         }
@@ -1709,7 +1757,12 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         return Err("Exact format IDs apply only to one inspected media item, not a playlist".into());
     }
     let args = media_format_args(&format)?;
-    let output_folder = engine.settings.lock().map_err(|error| error.to_string())?.download_dir.clone();
+    let media_settings = engine.settings.lock().map_err(|error| error.to_string())?.clone();
+    let media_category = if format == "audio" { "Audio" } else { "Videos" };
+    let output_folder = media_settings.category_directories.get(media_category).filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from).unwrap_or_else(|| if media_category == "Videos" {
+            PathBuf::from(&media_settings.download_dir).join("Videos")
+        } else { PathBuf::from(&media_settings.download_dir) });
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
     let mut command = yt_dlp_command();
     #[cfg(unix)]
@@ -2113,15 +2166,24 @@ fn open_download_folder(engine: State<'_, Engine>, gid: String) -> Result<(), St
 
 // Commit the history change on disk before publishing it in memory. If the
 // filesystem is full or not writable, a failed removal must remain visible.
+fn remove_download_file(item: &Download) -> Result<(), String> {
+    if item.path.trim().is_empty() { return Ok(()); }
+    let file = std::path::Path::new(&item.path);
+    if file.is_file() { fs::remove_file(file).map_err(|error| format!("Could not delete {}: {error}", file.display()))?; }
+    Ok(())
+}
+
 fn forget_history_entry(
     entries: &mut BTreeMap<String, Download>,
     gid: &str,
     path: &std::path::Path,
+    delete_file: bool,
 ) -> Result<(), String> {
     let item = entries.get(gid).ok_or("Unknown download")?;
-    if matches!(item.status.as_str(), "active" | "waiting" | "paused") {
+    if matches!(item.status.as_str(), "active" | "waiting" | "paused" | "recovering") {
         return Err("Stop the download before removing it from history".into());
     }
+    if delete_file { remove_download_file(item)?; }
     let mut next = entries.clone();
     next.remove(gid);
     save_json(path, &next)?;
@@ -2133,7 +2195,11 @@ fn forget_history_entry(
 fn clear_completed_history(
     entries: &mut BTreeMap<String, Download>,
     path: &std::path::Path,
+    delete_files: bool,
 ) -> Result<usize, String> {
+    if delete_files {
+        for item in entries.values().filter(|item| item.status == "complete") { remove_download_file(item)?; }
+    }
     let completed = entries.values().filter(|item| item.status == "complete").count();
     if completed == 0 {
         return Ok(0);
@@ -2146,15 +2212,15 @@ fn clear_completed_history(
 }
 
 #[tauri::command]
-fn clear_completed_downloads(engine: State<'_, Engine>) -> Result<usize, String> {
+fn clear_completed_downloads(engine: State<'_, Engine>, delete_files: bool) -> Result<usize, String> {
     let mut entries = engine.downloads.lock().map_err(|error| error.to_string())?;
-    clear_completed_history(&mut entries, &engine.data_dir.join("downloads.json"))
+    clear_completed_history(&mut entries, &engine.data_dir.join("downloads.json"), delete_files)
 }
 
 #[tauri::command]
-fn forget_download(engine: State<'_, Engine>, gid: String) -> Result<(), String> {
+fn forget_download(engine: State<'_, Engine>, gid: String, delete_file: bool) -> Result<(), String> {
     let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
-    forget_history_entry(&mut entries, &gid, &engine.data_dir.join("downloads.json"))
+    forget_history_entry(&mut entries, &gid, &engine.data_dir.join("downloads.json"), delete_file)
 }
 
 #[cfg(test)]
@@ -2298,15 +2364,15 @@ mod tests {
         ]);
         save_json(&path, &entries).unwrap();
         let unwritable = folder.join("missing").join("downloads.json");
-        assert!(clear_completed_history(&mut entries, &unwritable).is_err());
+        assert!(clear_completed_history(&mut entries, &unwritable, false).is_err());
         assert!(entries.contains_key("done"));
         assert!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
             .unwrap().contains_key("done"));
-        assert_eq!(clear_completed_history(&mut entries, &path).unwrap(), 1);
+        assert_eq!(clear_completed_history(&mut entries, &path, false).unwrap(), 1);
         assert!(!entries.contains_key("done"));
         assert!(entries.contains_key("paused"));
         assert!(entries.contains_key("error"));
-        assert_eq!(clear_completed_history(&mut entries, &path).unwrap(), 0);
+        assert_eq!(clear_completed_history(&mut entries, &path, false).unwrap(), 0);
         assert_eq!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
             .unwrap().len(), 2);
         fs::remove_dir_all(folder).unwrap();
@@ -2329,17 +2395,17 @@ mod tests {
         // If writing the new snapshot fails, the in-memory and on-disk
         // history must both retain the entry, including on app shutdown.
         let unwritable = folder.join("missing-parent").join("downloads.json");
-        assert!(forget_history_entry(&mut entries, "done", &unwritable).is_err());
+        assert!(forget_history_entry(&mut entries, "done", &unwritable, false).is_err());
         assert_eq!(entries.get("done"), Some(&item));
         assert!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
             .unwrap().contains_key("done"));
 
         // Active transfers must never be removed from history.
         entries.get_mut("done").unwrap().status = "paused".into();
-        assert!(forget_history_entry(&mut entries, "done", &path).is_err());
+        assert!(forget_history_entry(&mut entries, "done", &path, false).is_err());
         entries.get_mut("done").unwrap().status = "complete".into();
 
-        forget_history_entry(&mut entries, "done", &path).unwrap();
+        forget_history_entry(&mut entries, "done", &path, false).unwrap();
         assert!(!entries.contains_key("done"));
         assert!(load_json::<BTreeMap<String, Download>>(&path).unwrap()
             .unwrap().is_empty());
