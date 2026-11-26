@@ -975,7 +975,8 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             item.upload_speed = get_num("uploadSpeed");
             if let Some(name) = status.get("bittorrent").and_then(|v| v.get("info")).and_then(|v| v.get("name")).and_then(Value::as_str) {
                 item.name = name.to_string();
-            } else if let Some(files) = status.get("files").and_then(Value::as_array) {
+            }
+            if let Some(files) = status.get("files").and_then(Value::as_array) {
                 item.files = files.iter()
                     .filter_map(|entry| entry.get("path").and_then(Value::as_str))
                     .filter(|path| !path.trim().is_empty())
@@ -983,8 +984,10 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
                     .collect();
                 if let Some(path) = item.files.first() {
                     item.path = path.clone();
-                    if let Some(name) = std::path::Path::new(path).file_name().and_then(|s| s.to_str()) {
-                        if !item.is_torrent { item.name = name.to_string(); }
+                    if !item.is_torrent {
+                        if let Some(name) = std::path::Path::new(path).file_name().and_then(|s| s.to_str()) {
+                            item.name = name.to_string();
+                        }
                     }
                 }
             }
