@@ -2226,6 +2226,21 @@ fn forget_download(engine: State<'_, Engine>, gid: String, delete_file: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn category_download_paths_follow_extension_rules_and_overrides() {
+        let folder = std::env::temp_dir().join(format!("download-manager-category-{}", uuid::Uuid::new_v4()));
+        let mut settings = Settings::defaults();
+        settings.download_dir = folder.to_string_lossy().into_owned();
+        assert_eq!(category_download_dir(&settings, "https://example.test/archive.zip", None).unwrap(), folder.join("Compressed"));
+        assert_eq!(category_download_dir(&settings, "https://example.test/movie.mp4?token=abc", None).unwrap(), folder.join("Videos"));
+        assert_eq!(category_download_dir(&settings, "https://example.test/song.mp3", None).unwrap(), folder);
+        let custom = std::env::temp_dir().join("my-video-folder");
+        settings.category_directories.insert("Videos".into(), custom.to_string_lossy().into_owned());
+        assert_eq!(category_download_dir(&settings, "https://example.test/movie.mp4", None).unwrap(), custom);
+        let one_off = std::env::temp_dir().join("one-off");
+        assert_eq!(category_download_dir(&settings, "https://example.test/archive.zip", Some(one_off.to_str().unwrap())).unwrap(), one_off);
+    }
     #[test]
     fn json_save_replaces_document_without_leaving_partial_file() {
         let folder = std::env::temp_dir().join(format!("download-manager-test-{}", uuid::Uuid::new_v4()));
