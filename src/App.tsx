@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   Activity, ArrowDownToLine, ArrowUpToLine, ArrowDownToLine as QueueBottomIcon, CheckCircle2, Clock3, Download, FolderOpen, HardDrive,
   Link2, Magnet, Pause, Play, Plus, Search, Settings2, ShieldCheck, SlidersHorizontal, Video,
@@ -29,6 +30,8 @@ type Settings = {
   speedLimitKib: number;
   seedMinutes: number;
   downloadDir: string;
+  categoryExtensions: Record<string, string[]>;
+  categoryDirectories: Record<string, string>;
   refreshSeconds: number;
   lowMemoryMode: boolean;
 };
@@ -67,7 +70,15 @@ const viewDescriptions: Record<Filter, string> = {
   torrent: "Your magnet and BitTorrent downloads.",
 };
 type SettingsTab = "general" | "connection" | "save" | "downloads" | "integration" | "privacy";
-const defaults: Settings = { connections: 8, minSplitSizeMib: 1, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
+const defaultCategoryExtensions: Record<string, string[]> = {
+  Compressed: ["zip","7z","rar","tar","gz","bz2","xz","zst","tgz","iso","cab","lz","lzma"],
+  Videos: ["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpeg","mpg","3gp","ts","m2ts"],
+  Audio: ["mp3","m4a","aac","flac","wav","ogg","opus","wma","aiff"],
+  Images: ["jpg","jpeg","png","gif","webp","bmp","svg","tif","tiff","heic","avif"],
+  Documents: ["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","txt","rtf","epub","mobi"],
+  Programs: ["deb","rpm","appimage","exe","msi","dmg","apk","jar","sh"],
+};
+const defaults: Settings = { connections: 8, minSplitSizeMib: 1, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", categoryExtensions: defaultCategoryExtensions, categoryDirectories: {}, refreshSeconds: 3, lowMemoryMode: true };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
 const formatEta = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return "Calculating...";
@@ -95,6 +106,11 @@ function StatusIcon({ status }: { status: string }) {
 export default function App() {
   const [items, setItems] = useState<DownloadItem[]>([]);
   const [url, setUrl] = useState("");
+  const [newDownloadDirectory, setNewDownloadDirectory] = useState("");
+  const [useDirectoryAsDefault, setUseDirectoryAsDefault] = useState(false);
+  const [extensionDraft, setExtensionDraft] = useState<Record<string, string>>({});
+  const [clipboardCandidate, setClipboardCandidate] = useState("");
+  const [pendingForget, setPendingForget] = useState<DownloadItem | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
   const [batchError, setBatchError] = useState("");
@@ -150,6 +166,7 @@ export default function App() {
   }, [actionFeedback]);
 
   const [confirmClearCompleted, setConfirmClearCompleted] = useState(false);
+  const clipboardSeen = useRef("");
   const [working, setWorking] = useState(false);
   const [refreshError, setRefreshError] = useState("");
   const [engineHealth, setEngineHealth] = useState("Checking engine connection...");
@@ -180,7 +197,10 @@ export default function App() {
 
   useEffect(() => {
     void refresh();
-    invoke<Settings>("get_settings").then(s => { setSettings(s); setDraft(s); }).catch(e => setMessage(String(e)));
+    invoke<Settings>("get_settings").then(s => {
+      const migrated = { ...s, categoryExtensions: s.categoryExtensions || defaultCategoryExtensions, categoryDirectories: s.categoryDirectories || {} };
+      setSettings(migrated); setDraft(migrated);
+    }).catch(e => setMessage(String(e)));
     let mounted = true;
     const check = async () => {
       try {
@@ -213,6 +233,36 @@ export default function App() {
     } catch (err) { setMessage(String(err)); }
   };
 
+  const pickNewDownloadDirectory = async () => {
+    try {
+      const folder = await open({ multiple: false, directory: true });
+      if (typeof folder === "string") setNewDownloadDirectory(folder);
+    } catch (err) { setMessage(String(err)); }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const inspectClipboard = async () => {
+      if (!mounted || !document.hasFocus()) return;
+      try {
+        const value = (await readText()).trim();
+        if (!/^(https?:\\/\\/|ftp:\\/\\/|magnet:\\?)/i.test(value) || value.length > 4096) return;
+        if (value === clipboardSeen.current) return;
+        clipboardSeen.current = value;
+        setClipboardCandidate(value);
+        setUrl(value);
+        setNewDownloadDirectory(settings.downloadDir);
+        setUseDirectoryAsDefault(false);
+        setNewDownloadOpen(true);
+      } catch {
+        // Clipboard access may be unavailable in a restricted desktop session.
+      }
+    };
+    void inspectClipboard();
+    const timer = window.setInterval(() => void inspectClipboard(), 1200);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [settings.downloadDir]);
+
   const looksLikeMedia = /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com)\//i.test(url.trim());
   const openMediaFromLink = () => {
     setMediaUrl(url.trim()); setMediaPreview(null); setPlaylistPreview(null);
@@ -225,11 +275,17 @@ export default function App() {
     setMessage("");
     setWorking(true);
     try {
-      await invoke("add_download", { source: url.trim() });
+      if (useDirectoryAsDefault && newDownloadDirectory.trim()) {
+        const updated = { ...settings, downloadDir: newDownloadDirectory.trim() };
+        await invoke("save_settings", { settings: updated });
+        setSettings(updated); setDraft(updated);
+      }
+      await invoke("add_download", { source: url.trim(), downloadDir: newDownloadDirectory.trim() || null });
       setFilter("all");
       setQuery("");
       setMessage("Download added. Showing all downloads.");
       setUrl("");
+      setClipboardCandidate("");
       setNewDownloadOpen(false);
       await refresh();
     } catch (err) { setMessage(String(err)); }
@@ -329,10 +385,14 @@ export default function App() {
     }
   };
 
-  const forget = async (gid: string) => {
+  const forget = async (gid: string, deleteFile: boolean) => {
     setActionFeedback("");
-    try { await invoke("forget_download", { gid }); await refresh(); setActionFeedback("Download removed from history."); }
-    catch (err) { setActionFeedback(String(err)); }
+    try {
+      await invoke("forget_download", { gid, deleteFile });
+      setPendingForget(null);
+      await refresh();
+      setActionFeedback(deleteFile ? "Download and local file deleted." : "Download removed from history. Local file kept.");
+    } catch (err) { setActionFeedback(String(err)); }
   };
 
   const forgetMedia = async (id: string) => {
@@ -344,16 +404,16 @@ export default function App() {
     } catch (error) { setActionFeedback(String(error)); }
   };
 
-  const clearAllHistory = async () => {
+  const clearAllHistory = async (deleteFiles: boolean) => {
     setWorking(true);
     setActionFeedback("");
     try {
       const removed = await invoke<number>("clear_media_history");
       const media = await invoke<MediaJob[]>("list_media_jobs");
       setMediaJobs(media);
-      const completed = await invoke<number>("clear_completed_downloads");
+      const completed = await invoke<number>("clear_completed_downloads", { deleteFiles });
       await refresh();
-      setActionFeedback(`${removed + completed} history entries cleared. Downloaded files were kept. Active media downloads were not removed.`);
+      setActionFeedback(`${removed + completed} history entries cleared. ${deleteFiles ? "Completed direct-download files were deleted." : "Downloaded files were kept."} Active transfers were not removed.`);
     } catch (error) { setActionFeedback(String(error)); }
     finally { setWorking(false); }
   };
@@ -617,8 +677,9 @@ export default function App() {
     setWorking(true);
     setSettingsError("");
     try {
-      await invoke("save_settings", { settings: { ...draft, connections: Number(draft.connections), minSplitSizeMib: Number(draft.minSplitSizeMib), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib), seedMinutes: Number(draft.seedMinutes) } });
-      setSettings(draft); setSettingsOpen(false);
+      const updated = { ...draft, connections: Number(draft.connections), minSplitSizeMib: Number(draft.minSplitSizeMib), concurrent: Number(draft.concurrent), speedLimitKib: Number(draft.speedLimitKib), seedMinutes: Number(draft.seedMinutes) };
+      await invoke("save_settings", { settings: updated });
+      setSettings(updated); setDraft(updated); setSettingsOpen(false);
     } catch (err) { setSettingsError(String(err)); }
     finally { setWorking(false); }
   };
@@ -651,7 +712,7 @@ export default function App() {
         <span className="brand-icon"><ArrowDownToLine size={22} /></span>
         {sidebarExpanded && <span className="brand-copy"><strong>Download<span>Manager</span></strong><small>YOUR DOWNLOAD HUB</small></span>}
       </button>
-      <button type="button" className="nav nav-new-download" title="New download" onClick={() => { setFilter("all"); setNewDownloadOpen(true); }}>
+      <button type="button" className="nav nav-new-download" title="New download" onClick={() => { setFilter("all"); setNewDownloadDirectory(settings.downloadDir); setUseDirectoryAsDefault(false); setNewDownloadOpen(true); }}>
         <span className="nav-icon"><Plus size={18}/></span>{sidebarExpanded && <span className="nav-name">New download</span>}
       </button>
       {sidebarExpanded && <div className="nav-label">WORKSPACE</div>}
@@ -723,7 +784,7 @@ export default function App() {
               {["active", "waiting", "paused"].includes(item.status) && <button title="Cancel" aria-label={"Cancel " + item.name} onClick={() => void control(item.gid, "cancel")}><X size={17}/></button>}
               {["error", "removed", "interrupted"].includes(item.status) && <button title="Retry download" aria-label={"Retry " + item.name} onClick={() => void retry(item)}><Play size={17}/></button>}
               {item.status === "complete" && <button title="Open containing folder" aria-label={"Open folder for " + item.name} onClick={() => void openFolder(item.gid)}><FolderOpen size={17}/></button>}
-              {!activeState(item.status) && <button title="Remove from history (does not delete files)" aria-label={"Forget " + item.name} onClick={() => void forget(item.gid)}><Trash2 size={17}/></button>}
+              {!activeState(item.status) && <button title="Remove from history or delete local file" aria-label={"Remove " + item.name} onClick={() => setPendingForget(item)}><Trash2 size={17}/></button>}
             </div>
           </article>)}</div>}
       </section>
@@ -745,10 +806,14 @@ export default function App() {
     </div>}
       {actionFeedback && <div className="toast-notification" role="status" aria-live="polite"><span>{actionFeedback}</span><button type="button" aria-label="Dismiss notification" onClick={() => setActionFeedback("")}><X size={14}/></button></div>}
       {newDownloadOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setNewDownloadOpen(false); }}><section className="modal media-modal add-box" role="dialog" aria-modal="true" aria-label="New download"><div className="modal-title"><div><Plus size={20}/><h2>New download</h2></div><button type="button" aria-label="Close new download" onClick={() => setNewDownloadOpen(false)}><X size={18}/></button></div><p className="hint">HTTP · HTTPS · VIDEO · AUDIO · MAGNET · TORRENT</p>
-        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a download or video link" /><button disabled={working || mediaBusy} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : looksLikeMedia ? "Choose video format" : "Add download"}</button></div><div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
+        {clipboardCandidate && clipboardCandidate === url && <p className="notice-success">Download link detected from clipboard.</p>}
+        <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a download or video link" /><button disabled={working || mediaBusy} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : looksLikeMedia ? "Choose video format" : "Add download"}</button></div>
+        <label><span>Download directory for this file</span><div className="folder-row"><input value={newDownloadDirectory} onChange={e => setNewDownloadDirectory(e.target.value)} placeholder={settings.downloadDir || "~/Downloads"}/><button type="button" onClick={() => void pickNewDownloadDirectory()}>Browse</button></div></label>
+        <label className="settings-toggle"><input type="checkbox" checked={useDirectoryAsDefault} onChange={e => setUseDirectoryAsDefault(e.target.checked)}/><span><strong>Use this as the default directory</strong><small>Save this directory for future downloads too.</small></span></label>
+        <div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
         {message && <p className={message.startsWith("Download added.") || message.endsWith("downloads queued.") ? "notice-success" : "error"} role="status">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
-        <p className="hint">For a local torrent or metalink, paste its absolute file path. Files download to {settings.downloadDir || "~/Downloads"}.</p>
+        <p className="hint">Category rules may place compressed files and videos in their own folders unless you choose a custom directory above.</p>
       </section></div>}
 
     {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
@@ -803,8 +868,15 @@ export default function App() {
     {confirmClearCompleted && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setConfirmClearCompleted(false); }}>
       <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Clear completed download history" aria-describedby="clear-completed-explanation">
         <div className="modal-title"><div><Trash2 size={21}/><h2>Clear completed history?</h2></div><button aria-label="Close confirmation" type="button" onClick={() => setConfirmClearCompleted(false)}><X size={18}/></button></div>
-        <p id="clear-completed-explanation">Clear completed direct downloads and stopped media jobs from history? Active transfers and downloaded files will be kept. This cannot be undone.</p>
-        <div className="modal-actions"><button type="button" onClick={() => setConfirmClearCompleted(false)}>Cancel</button><button type="button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(); }}>{working ? "Clearing..." : "Clear history only"}</button></div>
+        <p id="clear-completed-explanation">Clear completed downloads and stopped media jobs from the list? Choose whether downloaded direct files should also be deleted. Active transfers are kept. This cannot be undone.</p>
+        <div className="modal-actions"><button type="button" onClick={() => setConfirmClearCompleted(false)}>Cancel</button><button type="button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(false); }}>{working ? "Clearing..." : "No, keep local files"}</button><button type="button" className="danger-button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(true); }}>{working ? "Clearing..." : "Yes, delete local files"}</button></div>
+      </section>
+    </div>}
+    {pendingForget && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPendingForget(null); }}>
+      <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Remove download">
+        <div className="modal-title"><div><Trash2 size={21}/><h2>Remove download?</h2></div><button type="button" aria-label="Close confirmation" onClick={() => setPendingForget(null)}><X size={18}/></button></div>
+        <p>Remove <strong>{pendingForget.name}</strong> from the download list? Choose whether its local downloaded file should also be deleted.</p>
+        <div className="modal-actions"><button type="button" onClick={() => setPendingForget(null)}>Cancel</button><button type="button" onClick={() => void forget(pendingForget.gid, false)}>No, history only</button><button type="button" className="danger-button" onClick={() => void forget(pendingForget.gid, true)}>Yes, delete local file</button></div>
       </section>
     </div>}
     {batchOpen && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setBatchOpen(false); }}>
@@ -859,7 +931,9 @@ export default function App() {
             {settingsTab === "save" && <>
               <h3>Save To</h3><p>Choose where new downloads are stored.</p>
               <label><span>Default download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
-              <p className="settings-note">Existing downloads keep their original location. Automatic category folders and temporary-folder selection are planned.</p>
+              <p className="settings-note">Compressed files and videos use their own folders by default. Other categories stay in the main Downloads folder unless you set a custom location.</p>
+              <h3>Category folders</h3>
+              {Object.keys(draft.categoryExtensions || defaultCategoryExtensions).map(category => <label key={category}><span>{category} directory (blank = default)</span><div className="folder-row"><input value={draft.categoryDirectories?.[category] || ""} placeholder={category === "Compressed" || category === "Videos" ? settings.downloadDir + "/" + category : settings.downloadDir} onChange={e => setDraft(s => ({ ...s, categoryDirectories: { ...s.categoryDirectories, [category]: e.target.value } }))}/><button type="button" onClick={async () => { try { const folder = await open({ multiple: false, directory: true }); if (typeof folder === "string") setDraft(s => ({ ...s, categoryDirectories: { ...s.categoryDirectories, [category]: folder } })); } catch (error) { setSettingsError(String(error)); } }}>Browse</button></div></label>)}
             </>}
             {settingsTab === "downloads" && <>
               <h3>Downloads & torrents</h3><p>Manage transfer behavior.</p>
@@ -867,11 +941,12 @@ export default function App() {
               <p className="settings-note">The seeding limit applies to new torrents. Use the Scheduler button above the download list to start a queued batch at a chosen time with a concurrency limit and optional completion action. Repeating schedules are planned.</p>
             </>}
             {settingsTab === "integration" && <>
-              <h3>Browser integration & file types</h3><p>Planned features, not enabled in this preview.</p>
-              <div className="planned-row">Browser extension integration <span>Planned</span></div>
-              <div className="planned-row">Clipboard URL monitoring <span>Planned</span></div>
-              <div className="planned-row">File extension takeover lists <span>Planned</span></div>
-              <div className="planned-row">Site exclusions & keyboard shortcuts <span>Planned</span></div>
+              <h3>File type categories</h3><p>Edit which extensions belong to each category. Enter an extension such as .mp4 and add it to the matching list.</p>
+              {Object.entries(draft.categoryExtensions || defaultCategoryExtensions).map(([category, extensions]) => <div className="category-editor" key={category}>
+                <strong>{category}</strong><div className="extension-chips">{extensions.map(ext => <button type="button" key={ext} title={"Remove ." + ext} onClick={() => setDraft(s => ({ ...s, categoryExtensions: { ...s.categoryExtensions, [category]: s.categoryExtensions[category].filter(value => value !== ext) } }))}>.{ext} <X size={11}/></button>)}</div>
+                <div className="input-row"><input aria-label={"New " + category + " extension"} placeholder=".mp4" value={extensionDraft[category] || ""} onChange={e => setExtensionDraft(s => ({ ...s, [category]: e.target.value }))} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); const ext = (extensionDraft[category] || "").trim().replace(/^\.+/, "").toLowerCase(); if (/^[a-z0-9]{1,16}$/.test(ext)) { setDraft(s => ({ ...s, categoryExtensions: { ...s.categoryExtensions, [category]: Array.from(new Set([...(s.categoryExtensions[category] || []), ext])) } })); setExtensionDraft(s => ({ ...s, [category]: "" })); } } }}/><button type="button" onClick={() => { const ext = (extensionDraft[category] || "").trim().replace(/^\.+/, "").toLowerCase(); if (/^[a-z0-9]{1,16}$/.test(ext)) { setDraft(s => ({ ...s, categoryExtensions: { ...s.categoryExtensions, [category]: Array.from(new Set([...(s.categoryExtensions[category] || []), ext])) } })); setExtensionDraft(s => ({ ...s, [category]: "" })); } }}>Add type</button></div>
+              </div>)}
+              <p className="settings-note">Unknown extensions and all unclassified files are saved directly in the main download directory.</p>
             </>}
             {settingsTab === "privacy" && <>
               <h3>Proxy, accounts & privacy</h3><p>Planned features, not enabled in this preview.</p>
