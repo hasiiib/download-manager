@@ -264,6 +264,17 @@ export default function App() {
   }, [settings.downloadDir]);
 
   const looksLikeMedia = /^(https?:\/\/)?(www\.|m\.)?(youtube\.com|youtu\.be|vimeo\.com|tiktok\.com|instagram\.com)\//i.test(url.trim());
+  const destinationPreview = (() => {
+    const base = newDownloadDirectory.trim() || settings.downloadDir || "~/Downloads";
+    if (newDownloadDirectory.trim() && newDownloadDirectory.trim() !== settings.downloadDir) return base;
+    const cleanUrl = url.split(/[?#]/)[0];
+    const extension = cleanUrl.includes(".") ? cleanUrl.split(".").pop()?.toLowerCase() || "" : "";
+    const category = looksLikeMedia ? "Videos" : Object.entries(settings.categoryExtensions || defaultCategoryExtensions)
+      .find(([, extensions]) => extensions.some(ext => ext.toLowerCase() === extension))?.[0];
+    if (!category) return base;
+    if (settings.categoryDirectories?.[category]) return settings.categoryDirectories[category];
+    return category === "Compressed" || category === "Videos" ? base.replace(/\/$/, "") + "/" + category : base;
+  })();
   const openMediaFromLink = () => {
     setMediaUrl(url.trim()); setMediaPreview(null); setPlaylistPreview(null);
     setMediaError(""); setMediaOpen(true);
@@ -275,12 +286,16 @@ export default function App() {
     setMessage("");
     setWorking(true);
     try {
-      if (useDirectoryAsDefault && newDownloadDirectory.trim()) {
-        const updated = { ...settings, downloadDir: newDownloadDirectory.trim() };
+      const selectedDirectory = newDownloadDirectory.trim() || settings.downloadDir;
+      let effectiveDefault = settings.downloadDir;
+      if (useDirectoryAsDefault && selectedDirectory) {
+        const updated = { ...settings, downloadDir: selectedDirectory };
         await invoke("save_settings", { settings: updated });
         setSettings(updated); setDraft(updated);
+        effectiveDefault = updated.downloadDir;
       }
-      await invoke("add_download", { source: url.trim(), downloadDir: newDownloadDirectory.trim() || null });
+      const directoryOverride = selectedDirectory === effectiveDefault ? null : selectedDirectory;
+      await invoke("add_download", { source: url.trim(), downloadDir: directoryOverride });
       setFilter("all");
       setQuery("");
       setMessage("Download added. Showing all downloads.");
@@ -808,12 +823,12 @@ export default function App() {
       {newDownloadOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setNewDownloadOpen(false); }}><section className="modal media-modal add-box" role="dialog" aria-modal="true" aria-label="New download"><div className="modal-title"><div><Plus size={20}/><h2>New download</h2></div><button type="button" aria-label="Close new download" onClick={() => setNewDownloadOpen(false)}><X size={18}/></button></div><p className="hint">HTTP · HTTPS · VIDEO · AUDIO · MAGNET · TORRENT</p>
         {clipboardCandidate && clipboardCandidate === url && <p className="notice-success">Download link detected from clipboard.</p>}
         <div className="input-row"><input aria-label="Download source" value={url} onChange={e => setUrl(e.target.value)} onKeyDown={e => { if (e.key === "Enter") void add(); }} placeholder="Paste a download or video link" /><button disabled={working || mediaBusy} onClick={() => void add()}><Plus size={18} /> {working ? "Working..." : looksLikeMedia ? "Choose video format" : "Add download"}</button></div>
-        <label><span>Download directory for this file</span><div className="folder-row"><input value={newDownloadDirectory} onChange={e => setNewDownloadDirectory(e.target.value)} placeholder={settings.downloadDir || "~/Downloads"}/><button type="button" onClick={() => void pickNewDownloadDirectory()}>Browse</button></div></label>
+        <label><span>Download directory for this file (base folder)</span><div className="folder-row"><input value={newDownloadDirectory} onChange={e => setNewDownloadDirectory(e.target.value)} placeholder={settings.downloadDir || "~/Downloads"}/><button type="button" onClick={() => void pickNewDownloadDirectory()}>Browse</button></div></label>
         <label className="settings-toggle"><input type="checkbox" checked={useDirectoryAsDefault} onChange={e => setUseDirectoryAsDefault(e.target.checked)}/><span><strong>Use this as the default directory</strong><small>Save this directory for future downloads too.</small></span></label>
         <div className="picker-row"><button type="button" onClick={() => void pickTorrent()}><FolderOpen size={15}/> Choose torrent / metalink file</button><button type="button" onClick={() => { setBatchError(""); setBatchOpen(true); }}><Plus size={15}/> Batch download links</button></div>
         {message && <p className={message.startsWith("Download added.") || message.endsWith("downloads queued.") ? "notice-success" : "error"} role="status">{message}</p>}
         {refreshError && <p className="error" role="alert">Engine: {refreshError}</p>}
-        <p className="hint">Category rules may place compressed files and videos in their own folders unless you choose a custom directory above.</p>
+        <p className="hint">Final save location: {destinationPreview}</p>
       </section></div>}
 
     {mediaOpen && <div className="modal-overlay" onMouseDown={event => { if (event.target === event.currentTarget) setMediaOpen(false); }}>
