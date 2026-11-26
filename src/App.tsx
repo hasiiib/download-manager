@@ -71,12 +71,12 @@ const viewDescriptions: Record<Filter, string> = {
 };
 type SettingsTab = "general" | "connection" | "save" | "downloads" | "integration" | "privacy";
 const defaultCategoryExtensions: Record<string, string[]> = {
-  Compressed: ["zip","7z","rar","tar","gz","bz2","xz","zst","tgz","iso","cab","lz","lzma"],
-  Videos: ["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpeg","mpg","3gp","ts","m2ts"],
-  Audio: ["mp3","m4a","aac","flac","wav","ogg","opus","wma","aiff"],
-  Images: ["jpg","jpeg","png","gif","webp","bmp","svg","tif","tiff","heic","avif"],
-  Documents: ["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","txt","rtf","epub","mobi"],
-  Programs: ["deb","rpm","appimage","exe","msi","dmg","apk","jar","sh"],
+  Compressed: ["zip","7z","rar","tar","gz","bz2","xz","zst","tgz","iso","cab","lz","lzma","z","lz4","br","arj","ace","zoo","lzh","lha","pak","squashfs"],
+  Videos: ["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpeg","mpg","3gp","ts","m2ts","ogv","m2v","vob","mts","mxf","f4v","asf","divx","rm","rmvb","3g2","mpe"],
+  Audio: ["mp3","m4a","aac","flac","wav","ogg","opus","wma","aiff","amr","ape","mid","midi","mka","au","ra","tta","wv","ac3","dts","caf"],
+  Images: ["jpg","jpeg","png","gif","webp","bmp","svg","tif","tiff","heic","avif","raw","cr2","nef","arw","ico","jxl","jfif","psd","ai","eps"],
+  Documents: ["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","txt","rtf","epub","mobi","csv","md","markdown","tex","djvu","ps","pages","numbers","key"],
+  Programs: ["deb","rpm","appimage","exe","msi","dmg","apk","jar","sh","bin","run","pkg","flatpak","snap","xapk","app","msix","bat","cmd","ps1"],
 };
 const defaults: Settings = { connections: 8, minSplitSizeMib: 1, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", categoryExtensions: defaultCategoryExtensions, categoryDirectories: {}, refreshSeconds: 3, lowMemoryMode: true };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
@@ -970,7 +970,7 @@ export default function App() {
               <label><span>Default download directory</span><div className="folder-row"><input value={draft.downloadDir} onChange={e => setDraft(s => ({ ...s, downloadDir: e.target.value }))}/><button type="button" onClick={() => void pickDirectory()}>Browse</button></div></label>
               <p className="settings-note">Compressed files and videos use their own folders by default. Other categories stay in the main Downloads folder unless you set a custom location.</p>
               <h3>Category folders</h3>
-              {Object.keys(draft.categoryExtensions || defaultCategoryExtensions).map(category => <label key={category}><span>{category} directory (blank = default)</span><div className="folder-row"><input value={draft.categoryDirectories?.[category] || ""} placeholder={category === "Compressed" || category === "Videos" ? settings.downloadDir + "/" + category : settings.downloadDir} onChange={e => setDraft(s => ({ ...s, categoryDirectories: { ...s.categoryDirectories, [category]: e.target.value } }))}/><button type="button" onClick={async () => { try { const folder = await open({ multiple: false, directory: true }); if (typeof folder === "string") setDraft(s => ({ ...s, categoryDirectories: { ...s.categoryDirectories, [category]: folder } })); } catch (error) { setSettingsError(String(error)); } }}>Browse</button></div></label>)}
+              {Object.keys(draft.categoryExtensions || defaultCategoryExtensions).map(category => <label key={category}><span>{category} directory (blank = default)</span><div className="folder-row"><input value={draft.categoryDirectories?.[category] || ""} placeholder={category === "Compressed" || category === "Videos" ? draft.downloadDir + "/" + category : draft.downloadDir} onChange={e => setDraft(s => ({ ...s, categoryDirectories: { ...s.categoryDirectories, [category]: e.target.value } }))}/><button type="button" onClick={async () => { try { const folder = await open({ multiple: false, directory: true }); if (typeof folder === "string") setDraft(s => ({ ...s, categoryDirectories: { ...s.categoryDirectories, [category]: folder } })); } catch (error) { setSettingsError(String(error)); } }}>Browse</button></div></label>)}
             </>}
             {settingsTab === "downloads" && <>
               <h3>Downloads & torrents</h3><p>Manage transfer behavior.</p>

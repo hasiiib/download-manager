@@ -51,12 +51,12 @@ fn default_refresh_seconds() -> u8 { 3 }
 fn default_low_memory_mode() -> bool { true }
 fn default_category_extensions() -> BTreeMap<String, Vec<String>> {
     BTreeMap::from([
-        ("Compressed".into(), vec!["zip","7z","rar","tar","gz","bz2","xz","zst","tgz","iso","cab","lz","lzma"].into_iter().map(str::to_string).collect()),
-        ("Videos".into(), vec!["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpeg","mpg","3gp","ts","m2ts"].into_iter().map(str::to_string).collect()),
-        ("Audio".into(), vec!["mp3","m4a","aac","flac","wav","ogg","opus","wma","aiff"].into_iter().map(str::to_string).collect()),
-        ("Images".into(), vec!["jpg","jpeg","png","gif","webp","bmp","svg","tif","tiff","heic","avif"].into_iter().map(str::to_string).collect()),
-        ("Documents".into(), vec!["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","txt","rtf","epub","mobi"].into_iter().map(str::to_string).collect()),
-        ("Programs".into(), vec!["deb","rpm","appimage","exe","msi","dmg","apk","jar","sh"].into_iter().map(str::to_string).collect()),
+        ("Compressed".into(), vec!["zip","7z","rar","tar","gz","bz2","xz","zst","tgz","iso","cab","lz","lzma","z","lz4","br","arj","ace","zoo","lzh","lha","pak","squashfs"].into_iter().map(str::to_string).collect()),
+        ("Videos".into(), vec!["mp4","mkv","avi","mov","wmv","flv","webm","m4v","mpeg","mpg","3gp","ts","m2ts","ogv","m2v","vob","mts","mxf","f4v","asf","divx","rm","rmvb","3g2","mpe"].into_iter().map(str::to_string).collect()),
+        ("Audio".into(), vec!["mp3","m4a","aac","flac","wav","ogg","opus","wma","aiff","amr","ape","mid","midi","mka","au","ra","tta","wv","ac3","dts","caf"].into_iter().map(str::to_string).collect()),
+        ("Images".into(), vec!["jpg","jpeg","png","gif","webp","bmp","svg","tif","tiff","heic","avif","raw","cr2","nef","arw","ico","jxl","jfif","psd","ai","eps"].into_iter().map(str::to_string).collect()),
+        ("Documents".into(), vec!["pdf","doc","docx","xls","xlsx","ppt","pptx","odt","ods","txt","rtf","epub","mobi","csv","md","markdown","tex","djvu","ps","pages","numbers","key"].into_iter().map(str::to_string).collect()),
+        ("Programs".into(), vec!["deb","rpm","appimage","exe","msi","dmg","apk","jar","sh","bin","run","pkg","flatpak","snap","xapk","app","msix","bat","cmd","ps1"].into_iter().map(str::to_string).collect()),
     ])
 }
 
