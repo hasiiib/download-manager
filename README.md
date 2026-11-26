@@ -75,6 +75,8 @@ No license has yet been selected for this application. Review library and engine
 
 ## Download speed tuning
 
+- The connection setting accepts up to 32 requested segments. aria2 itself limits connections to one server to 16, so a single-origin download cannot exceed 16 simultaneous connections; mirrors can make use of a larger split count.
+- aria2 control-file auto-save is disabled during active transfers to avoid repeatedly writing a visible `.aria2` sidecar beside the payload. aria2 still writes control data when it stops, so interrupted downloads can keep resume data; completed downloads should leave the payload file only.
 - New installations use a 2 MiB minimum segment size instead of 4 MiB. Since aria2 needs at least two minimum-size ranges to split a file, this allows supported HTTP servers to parallelize medium-sized files earlier while retaining the moderate default of 8 requested segments.
 - Existing saved settings are preserved. To use the new setting on an existing installation, open Settings → Connection and set Minimum segment size to `2` MiB. More connections do not guarantee higher speed: the server must support byte ranges and may enforce its own limits.
 

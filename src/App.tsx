@@ -854,7 +854,7 @@ export default function App() {
               <label><span>Minimum segment size (MiB)</span><input type="number" min="1" max="64" value={draft.minSplitSizeMib} onChange={e => setDraft(s => ({ ...s, minSplitSizeMib: Number(e.target.value) }))}/></label>
               <label><span>Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
               <label><span>Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" max="1048576" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
-              <p className="settings-note">Allows up to 32 requested segments per download. Stock aria2 caps connections to a single server at 16, so 32 segments do not guarantee 32 same-server connections. Settings affect newly queued downloads. A 2 MiB segment size lets medium-sized files split earlier; smaller values can add request overhead. Results depend on HTTP range support and server limits.</p>
+              <p className="settings-note">Allows up to 32 requested segments per download. aria2 has a hard limit of 16 connections to one server, so a single-server download can use at most 16 at once; 32 segments can be useful with multiple mirrors. Settings affect newly queued downloads. A 2 MiB segment size lets medium-sized files split earlier; smaller values can add request overhead. Results depend on HTTP range support and server limits.</p>
             </>}
             {settingsTab === "save" && <>
               <h3>Save To</h3><p>Choose where new downloads are stored.</p>

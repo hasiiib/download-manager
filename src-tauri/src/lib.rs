@@ -594,6 +594,9 @@ impl Engine {
             .arg("--follow-torrent=true")
             .arg("--follow-metalink=true")
             .arg("--save-session-interval=10")
+            // Avoid periodically writing a visible .aria2 sidecar during active downloads.
+            // aria2 still saves control data when it stops, preserving clean-shutdown resume.
+            .arg("--auto-save-interval=0")
             .arg(format!("--input-file={}", session.display()))
             .arg(format!("--save-session={}", session.display()))
             .arg(format!("--dir={}", settings.download_dir))
@@ -2540,9 +2543,10 @@ mod tests {
     }
 
     #[test]
-    fn standard_aria2_server_connection_limit_does_not_break_startup() {
+    fn aria2_uses_up_to_32_segments_but_respects_its_16_per_host_limit() {
         assert_eq!(aria2_server_connections(1), 1);
         assert_eq!(aria2_server_connections(16), 16);
+        // aria2 itself accepts at most 16 connections to one server.
         assert_eq!(aria2_server_connections(32), 16);
     }
 
