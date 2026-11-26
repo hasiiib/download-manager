@@ -246,7 +246,7 @@ export default function App() {
       if (!mounted || !document.hasFocus()) return;
       try {
         const value = (await readText()).trim();
-        if (!/^(https?:\\/\\/|ftp:\\/\\/|magnet:\\?)/i.test(value) || value.length > 4096) return;
+        if (!/^(https?:\/\/|ftp:\/\/|magnet:\?)/i.test(value) || value.length > 4096) return;
         if (value === clipboardSeen.current) return;
         clipboardSeen.current = value;
         setClipboardCandidate(value);
