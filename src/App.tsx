@@ -430,7 +430,7 @@ export default function App() {
       setMediaJobs(media);
       const completed = await invoke<number>("clear_completed_downloads", { deleteFiles });
       await refresh();
-      setActionFeedback(`${removed + completed} history entries cleared. ${deleteFiles ? "Completed direct-download files were deleted." : "Downloaded files were kept."} Active transfers were not removed.`);
+      setActionFeedback(`${removed + completed} history entries cleared. ${deleteFiles ? "Completed download files were deleted." : "Downloaded files were kept."} Active transfers were not removed.`);
     } catch (error) { setActionFeedback(String(error)); }
     finally { setWorking(false); }
   };
@@ -899,7 +899,7 @@ export default function App() {
       <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Clear completed download history" aria-describedby="clear-completed-explanation">
         <div className="modal-title"><div><Trash2 size={21}/><h2>Clear completed history?</h2></div><button aria-label="Close confirmation" type="button" onClick={() => setConfirmClearCompleted(false)}><X size={18}/></button></div>
         <p id="clear-completed-explanation">Clear completed downloads and stopped media jobs from the list? Choose whether their tracked local files should also be deleted. Active transfers are kept. This cannot be undone.</p>
-        <div className="modal-actions"><button type="button" onClick={() => setConfirmClearCompleted(false)}>Cancel</button><button type="button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(false); }}>{working ? "Clearing..." : "No, keep local files"}</button><button type="button" className="danger-button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(true); }}>{working ? "Clearing..." : "Yes, delete local files"}</button></div>
+        <div className="modal-actions"><button type="button" onClick={() => setConfirmClearCompleted(false)}>Cancel</button><button type="button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(false); }}>{working ? "Clearing..." : "No, keep local files"}</button><button type="button" className="danger-button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(true); }}>{working ? "Clearing..." : "Yes, delete local filess"}</button></div>
       </section>
     </div>}
     {pendingMediaForget && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPendingMediaForget(null); }}>
@@ -912,7 +912,7 @@ export default function App() {
     {pendingForget && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPendingForget(null); }}>
       <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Remove download">
         <div className="modal-title"><div><Trash2 size={21}/><h2>Remove download?</h2></div><button type="button" aria-label="Close confirmation" onClick={() => setPendingForget(null)}><X size={18}/></button></div>
-        <p>Remove <strong>{pendingForget.name}</strong> from the download list? Choose whether its local downloaded file should also be deleted.</p>
+        <p>Remove <strong>{pendingForget.name}</strong> from the download list? Choose whether its downloaded file or torrent files should also be deleted.</p>
         <div className="modal-actions"><button type="button" onClick={() => setPendingForget(null)}>Cancel</button><button type="button" onClick={() => void forget(pendingForget.gid, false)}>No, history only</button><button type="button" className="danger-button" onClick={() => void forget(pendingForget.gid, true)}>Yes, delete local file</button></div>
       </section>
     </div>}
