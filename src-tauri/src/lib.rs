@@ -978,13 +978,16 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             }
             if let Some(files) = status.get("files").and_then(Value::as_array) {
                 item.files = files.iter()
+                    // A torrent may report paths for unselected files too. Never
+                    // delete those, since they may be pre-existing local files.
+                    .filter(|entry| !item.is_torrent || entry.get("selected").and_then(Value::as_str) == Some("true"))
                     .filter_map(|entry| entry.get("path").and_then(Value::as_str))
                     .filter(|path| !path.trim().is_empty())
                     .map(str::to_string)
                     .collect();
-                if let Some(path) = item.files.first() {
-                    item.path = path.clone();
-                    if !item.is_torrent {
+                item.path = item.files.first().cloned().unwrap_or_default();
+                if !item.is_torrent {
+                    if let Some(path) = item.files.first() {
                         if let Some(name) = std::path::Path::new(path).file_name().and_then(|s| s.to_str()) {
                             item.name = name.to_string();
                         }
