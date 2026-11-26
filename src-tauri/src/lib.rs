@@ -1069,7 +1069,7 @@ async fn retry_download(engine: State<'_, Engine>, gid: String) -> Result<Downlo
             return Err(format!("Cannot check whether this transfer recovered: {error}"));
         }
     }
-    let replacement = enqueue(&engine, original.source.clone()).await?;
+    let replacement = enqueue(&engine, original.source.clone(), None).await?;
     let mut entries = engine.downloads.lock().map_err(|e| e.to_string())?;
     entries.remove(&gid);
     if let Err(error) = save_json(&engine.data_dir.join("downloads.json"), &*entries) {
@@ -1610,7 +1610,7 @@ async fn poll_feed_subscriptions(engine: &Engine) {
                         seen.push(item.source);
                         continue;
                     }
-                    match enqueue(engine, item.source.clone()).await {
+                    match enqueue(engine, item.source.clone(), None).await {
                         Ok(_) => seen.push(item.source),
                         Err(error) => last_error = Some(error),
                     }
