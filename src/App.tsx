@@ -42,7 +42,7 @@ type FeedSubscription = { id: string; source: string; title: string; autoDownloa
 type FeedPreview = { title: string; entries: { title: string; source: string; enclosure: boolean }[] };
 type PlaylistPreview = { title: string; entries: { index: number; title: string; durationSeconds: number | null }[] };
 type MediaPreview = { title: string; durationSeconds: number | null; uploader: string; webpageUrl: string; ytDlpVersion: string; formats: MediaFormat[] };
-type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; playlistItems: number[]; error: string | null; progress: number | null; speed: string; eta: string; currentItem: string; playlistIndex: number | null; overallProgress: number | null };
+type MediaJob = { id: string; title: string; status: string; format: string; playlist: boolean; playlistItems: number[]; error: string | null; progress: number | null; speed: string; eta: string; currentItem: string; playlistIndex: number | null; overallProgress: number | null; outputDir: string; files: string[] };
 type MediaTools = { ytDlp: string | null; ffmpeg: string | null };
 
 type Schedule = {
@@ -111,6 +111,7 @@ export default function App() {
   const [extensionDraft, setExtensionDraft] = useState<Record<string, string>>({});
   const [clipboardCandidate, setClipboardCandidate] = useState("");
   const [pendingForget, setPendingForget] = useState<DownloadItem | null>(null);
+  const [pendingMediaForget, setPendingMediaForget] = useState<MediaJob | null>(null);
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchText, setBatchText] = useState("");
   const [batchError, setBatchError] = useState("");
@@ -410,12 +411,13 @@ export default function App() {
     } catch (err) { setActionFeedback(String(err)); }
   };
 
-  const forgetMedia = async (id: string) => {
+  const forgetMedia = async (id: string, deleteFiles: boolean) => {
     setActionFeedback("");
     try {
-      await invoke("forget_media_job", { id });
+      await invoke("forget_media_job", { id, deleteFiles });
+      setPendingMediaForget(null);
       setMediaJobs(jobs => jobs.filter(job => job.id !== id));
-      setActionFeedback("Media history entry removed. Downloaded file was kept.");
+      setActionFeedback(deleteFiles ? "Media history and downloaded files deleted." : "Media history entry removed. Downloaded files were kept.");
     } catch (error) { setActionFeedback(String(error)); }
   };
 
@@ -423,7 +425,7 @@ export default function App() {
     setWorking(true);
     setActionFeedback("");
     try {
-      const removed = await invoke<number>("clear_media_history");
+      const removed = await invoke<number>("clear_media_history", { deleteFiles });
       const media = await invoke<MediaJob[]>("list_media_jobs");
       setMediaJobs(media);
       const completed = await invoke<number>("clear_completed_downloads", { deleteFiles });
@@ -619,16 +621,29 @@ export default function App() {
         setMediaError("Exact format IDs apply to one inspected video. Choose a quality preset for playlists.");
         return;
       }
+      const selectedDirectory = newDownloadDirectory.trim() || settings.downloadDir;
+      let effectiveDefault = settings.downloadDir;
+      if (useDirectoryAsDefault && selectedDirectory) {
+        const updated = { ...settings, downloadDir: selectedDirectory };
+        await invoke("save_settings", { settings: updated });
+        setSettings(updated); setDraft(updated);
+        effectiveDefault = updated.downloadDir;
+      }
+      const directoryOverride = selectedDirectory === effectiveDefault ? null : selectedDirectory;
       const job = await invoke<MediaJob>("start_media_download", {
         source: mediaUrl.trim(), format: mediaFormat, playlist: mediaPlaylist,
         playlistItems: mediaPlaylist && playlistPreview ? selectedPlaylistItems : [],
+        downloadDir: directoryOverride,
       });
       setMediaJobs(jobs => [...jobs, job]);
       setMediaOpen(false);
       setNewDownloadOpen(false);
       setUrl("");
       setMediaPreview(null);
-      setMediaError("Media download started. Files will be saved in " + (settings.downloadDir || "your downloads folder") + ".");
+      const mediaCategory = mediaFormat === "audio" ? "Audio" : "Videos";
+      const mediaFolder = directoryOverride || settings.categoryDirectories?.[mediaCategory] ||
+        (mediaCategory === "Videos" ? (effectiveDefault.replace(/\/$/, "") + "/Videos") : effectiveDefault);
+      setMediaError("Media download started. Files will be saved in " + mediaFolder + ".");
     } catch (error) { setMediaError(String(error)); }
     finally { setMediaBusy(false); }
   };
@@ -783,7 +798,7 @@ export default function App() {
               {job.status === "paused" && <button type="button" onClick={() => void controlMedia(job.id,"resume")}>Resume</button>}
               {["downloading","paused"].includes(job.status) && <button type="button" onClick={() => void cancelMedia(job.id)}>Cancel</button>}
               {["error","cancelled","interrupted"].includes(job.status) && <button type="button" onClick={() => void retryMedia(job.id)} title="Retry media download" aria-label={"Retry " + job.title}><Play size={17}/></button>}
-              {!["downloading","paused","queued"].includes(job.status) && <button type="button" title="Remove history entry (keep file)" aria-label={"Remove " + job.title + " from history"} onClick={() => void forgetMedia(job.id)}><Trash2 size={15}/></button>}
+              {!["downloading","paused","queued"].includes(job.status) && <button type="button" title="Remove history entry (keep file)" aria-label={"Remove " + job.title + " from history"} onClick={() => setPendingMediaForget(job)}><Trash2 size={15}/></button>}
             </div>
           </article>)}{shown.map(item => <article className="row" key={item.gid}>
             <div className="file-icon">{isTorrent(item) ? <Magnet size={20}/> : <Download size={20}/>}</div>
@@ -883,8 +898,15 @@ export default function App() {
     {confirmClearCompleted && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setConfirmClearCompleted(false); }}>
       <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Clear completed download history" aria-describedby="clear-completed-explanation">
         <div className="modal-title"><div><Trash2 size={21}/><h2>Clear completed history?</h2></div><button aria-label="Close confirmation" type="button" onClick={() => setConfirmClearCompleted(false)}><X size={18}/></button></div>
-        <p id="clear-completed-explanation">Clear completed downloads and stopped media jobs from the list? Choose whether downloaded direct files should also be deleted. Active transfers are kept. This cannot be undone.</p>
+        <p id="clear-completed-explanation">Clear completed downloads and stopped media jobs from the list? Choose whether their tracked local files should also be deleted. Active transfers are kept. This cannot be undone.</p>
         <div className="modal-actions"><button type="button" onClick={() => setConfirmClearCompleted(false)}>Cancel</button><button type="button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(false); }}>{working ? "Clearing..." : "No, keep local files"}</button><button type="button" className="danger-button" disabled={working} onClick={() => { setConfirmClearCompleted(false); void clearAllHistory(true); }}>{working ? "Clearing..." : "Yes, delete local files"}</button></div>
+      </section>
+    </div>}
+    {pendingMediaForget && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPendingMediaForget(null); }}>
+      <section className="modal confirm-modal" role="alertdialog" aria-modal="true" aria-label="Remove media download">
+        <div className="modal-title"><div><Trash2 size={21}/><h2>Remove media download?</h2></div><button type="button" aria-label="Close confirmation" onClick={() => setPendingMediaForget(null)}><X size={18}/></button></div>
+        <p>Remove <strong>{pendingMediaForget.title}</strong> from the list? Its finished media file(s) can also be deleted.</p>
+        <div className="modal-actions"><button type="button" onClick={() => setPendingMediaForget(null)}>Cancel</button><button type="button" onClick={() => void forgetMedia(pendingMediaForget.id, false)}>No, history only</button><button type="button" className="danger-button" onClick={() => void forgetMedia(pendingMediaForget.id, true)}>Yes, delete local files</button></div>
       </section>
     </div>}
     {pendingForget && <div className="modal-overlay" onMouseDown={e => { if (e.target === e.currentTarget) setPendingForget(null); }}>
