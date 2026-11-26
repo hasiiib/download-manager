@@ -163,6 +163,10 @@ struct MediaJob {
     playlist_index: Option<u32>,
     #[serde(default)]
     overall_progress: Option<f32>,
+    #[serde(default)]
+    output_dir: String,
+    #[serde(default)]
+    files: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -1336,12 +1340,26 @@ fn save_schedule(engine: &Engine, schedule: &Schedule) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn forget_media_job(engine: State<'_, Engine>, id: String) -> Result<(), String> {
+fn remove_media_job_files(job: &MediaJob) -> Result<(), String> {
+    let root = std::path::Path::new(&job.output_dir);
+    if !root.is_absolute() { return Ok(()); }
+    for raw_path in &job.files {
+        let path = std::path::Path::new(raw_path);
+        if path.is_absolute() && path.starts_with(root) && path.is_file() {
+            fs::remove_file(path).map_err(|error| format!("Could not delete media file {}: {error}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn forget_media_job(engine: State<'_, Engine>, id: String, delete_files: bool) -> Result<(), String> {
     let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
     let job = jobs.get(&id).ok_or("Media job not found")?;
     if matches!(job.status.as_str(), "downloading" | "paused" | "queued") {
         return Err("Stop this media download before removing its history".into());
     }
+    if delete_files { remove_media_job_files(job)?; }
     let mut updated = jobs.clone();
     updated.remove(&id);
     save_json(&engine.data_dir.join("media_jobs.json"), &updated)?;
@@ -1350,8 +1368,13 @@ fn forget_media_job(engine: State<'_, Engine>, id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-fn clear_media_history(engine: State<'_, Engine>) -> Result<usize, String> {
+fn clear_media_history(engine: State<'_, Engine>, delete_files: bool) -> Result<usize, String> {
     let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
+    if delete_files {
+        for job in jobs.values().filter(|job| !matches!(job.status.as_str(), "downloading" | "paused" | "queued")) {
+            remove_media_job_files(job)?;
+        }
+    }
     let mut updated = jobs.clone();
     updated.retain(|_, job| matches!(job.status.as_str(), "downloading" | "paused" | "queued"));
     let removed = jobs.len() - updated.len();
@@ -1785,6 +1808,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
         command.arg("--no-playlist");
     }
     command.args(["--progress-template", "download:DM_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(info.id)s|%(info.playlist_index)s"]);
+    command.args(["--print", "after_move:DM_FILE:%(filepath)s"]);
     command.args(args);
     command.arg("-P").arg(&output_folder);
     command.arg("--").arg(&source);
@@ -1794,7 +1818,8 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let job = MediaJob {
         id: id.clone(), title: source, status: "downloading".into(),
         format, playlist, playlist_items, error: None, progress: None, speed: String::new(), eta: String::new(),
-        current_item: String::new(), playlist_index: None, overall_progress: None,
+        current_item: String::new(), playlist_index: None, overall_progress: None, output_dir: String::new(), files: Vec::new(),
+        output_dir: output_folder.to_string_lossy().into_owned(), files: Vec::new(),
     };
     {
         let mut jobs = engine.media_jobs.lock().map_err(|error| error.to_string())?;
@@ -1815,6 +1840,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let reader_jobs = Arc::clone(&jobs);
     let reader_id = id.clone();
     let selected_for_progress = job.playlist_items.clone();
+    let allowed_output_dir = output_folder.clone();
     let stderr_reader = child.stderr.take().map(|output| std::thread::spawn(move || {
         let mut recent: std::collections::VecDeque<String> = std::collections::VecDeque::new();
         for line in BufReader::new(output).lines() {
@@ -1830,6 +1856,18 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let progress_reader = child.stdout.take().map(|output| std::thread::spawn(move || {
         for line in BufReader::new(output).lines() {
             let Ok(line) = line else { break };
+            if let Some(raw_path) = line.trim().strip_prefix("DM_FILE:") {
+                let path = std::path::PathBuf::from(raw_path.trim());
+                if path.is_absolute() && path.starts_with(&allowed_output_dir) {
+                    if let Ok(mut entries) = reader_jobs.lock() {
+                        if let Some(entry) = entries.get_mut(&reader_id) {
+                            let normalized = path.to_string_lossy().into_owned();
+                            if !entry.files.contains(&normalized) { entry.files.push(normalized); }
+                        }
+                    }
+                }
+                continue;
+            }
             if let Some((progress, speed, eta, current_item, playlist_index)) = parse_media_progress(&line) {
                 if let Ok(mut entries) = reader_jobs.lock() {
                     if let Some(entry) = entries.get_mut(&reader_id) {
@@ -2505,7 +2543,7 @@ mod tests {
             id: "pause".into(), title: "https://example.org/watch".into(),
             status: "paused".into(), format: "mp4".into(), playlist: false,
             playlist_items: vec![], error: None, progress: Some(12.0), speed: String::new(), eta: String::new(),
-            current_item: String::new(), playlist_index: None, overall_progress: None,
+            current_item: String::new(), playlist_index: None, overall_progress: None, output_dir: String::new(), files: Vec::new(),
         })]);
         let resumed = restore_media_jobs(jobs);
         assert_eq!(resumed["pause"].status, "interrupted");
@@ -2517,7 +2555,7 @@ mod tests {
             id: "one".into(), title: "https://example.org/video".into(),
             status: "downloading".into(), format: "mp4".into(), playlist: true,
             playlist_items: vec![1, 3], error: None, progress: Some(20.0), speed: "4MiB/s".into(), eta: "00:30".into(),
-            current_item: String::new(), playlist_index: None, overall_progress: None,
+            current_item: String::new(), playlist_index: None, overall_progress: None, output_dir: String::new(), files: Vec::new(),
         };
         let jobs = restore_media_jobs(BTreeMap::from([("one".into(), job)]));
         assert_eq!(jobs["one"].status, "interrupted");
