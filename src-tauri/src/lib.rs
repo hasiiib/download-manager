@@ -1769,11 +1769,11 @@ fn retry_media_download(engine: State<'_, Engine>, id: String) -> Result<MediaJo
     };
     // Existing partial files remain on disk, letting yt-dlp resume where the
     // server and media format support it. The old history record is preserved.
-    start_media_download(engine, original.title, original.format, original.playlist, original.playlist_items)
+    start_media_download(engine, original.title, original.format, original.playlist, original.playlist_items, None)
 }
 
 #[tauri::command]
-fn start_media_download(engine: State<'_, Engine>, source: String, format: String, playlist: bool, playlist_items: Vec<u32>) -> Result<MediaJob, String> {
+fn start_media_download(engine: State<'_, Engine>, source: String, format: String, playlist: bool, playlist_items: Vec<u32>, download_dir: Option<String>) -> Result<MediaJob, String> {
     media_http_url(&source)?;
     validate_playlist_items(&playlist_items, playlist)?;
     if playlist && format.starts_with("id:") {
@@ -1782,10 +1782,11 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let args = media_format_args(&format)?;
     let media_settings = engine.settings.lock().map_err(|error| error.to_string())?.clone();
     let media_category = if format == "audio" { "Audio" } else { "Videos" };
-    let output_folder = media_settings.category_directories.get(media_category).filter(|value| !value.trim().is_empty())
-        .map(PathBuf::from).unwrap_or_else(|| if media_category == "Videos" {
-            PathBuf::from(&media_settings.download_dir).join("Videos")
-        } else { PathBuf::from(&media_settings.download_dir) });
+    let output_folder = download_dir.filter(|value| !value.trim().is_empty()).map(PathBuf::from)
+        .unwrap_or_else(|| media_settings.category_directories.get(media_category).filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from).unwrap_or_else(|| if media_category == "Videos" {
+                PathBuf::from(&media_settings.download_dir).join("Videos")
+            } else { PathBuf::from(&media_settings.download_dir) }));
     fs::create_dir_all(&output_folder).map_err(|error| error.to_string())?;
     let mut command = yt_dlp_command();
     #[cfg(unix)]
@@ -1818,7 +1819,7 @@ fn start_media_download(engine: State<'_, Engine>, source: String, format: Strin
     let job = MediaJob {
         id: id.clone(), title: source, status: "downloading".into(),
         format, playlist, playlist_items, error: None, progress: None, speed: String::new(), eta: String::new(),
-        current_item: String::new(), playlist_index: None, overall_progress: None, output_dir: String::new(), files: Vec::new(),
+        current_item: String::new(), playlist_index: None, overall_progress: None,
         output_dir: output_folder.to_string_lossy().into_owned(), files: Vec::new(),
     };
     {
