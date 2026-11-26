@@ -21,6 +21,8 @@ struct Download {
     download_speed: u64,
     upload_speed: u64,
     path: String,
+    #[serde(default)]
+    files: Vec<String>,
     error: Option<String>,
 }
 
@@ -850,7 +852,7 @@ async fn enqueue(engine: &Engine, source: String, directory_override: Option<Str
         else { return Err("aria2 returned an unexpected download ID".into()); };
     let name = input.rsplit('/').next().unwrap_or(input).chars().take(120).collect::<String>();
     let item = Download { gid, source: input.to_string(), is_torrent: input.starts_with("magnet:") || input.to_ascii_lowercase().contains(".torrent"), name, status: "waiting".into(), completed_length: 0,
-        total_length: 0, download_speed: 0, upload_speed: 0, path: String::new(), error: None };
+        total_length: 0, download_speed: 0, upload_speed: 0, path: String::new(), files: Vec::new(), error: None };
     if let Err(error) = engine.remember(item.clone()) {
         // The RPC transfer is already running. Returning an error here could
         // tempt users to retry and accidentally enqueue a duplicate download.
@@ -958,6 +960,7 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
                         child.download_speed = 0;
                         child.upload_speed = 0;
                         child.path.clear();
+                        child.files.clear();
                         child.error = None;
                         discovered.push(child);
                     }
@@ -972,11 +975,17 @@ async fn list_downloads(engine: State<'_, Engine>) -> Result<Vec<Download>, Stri
             item.upload_speed = get_num("uploadSpeed");
             if let Some(name) = status.get("bittorrent").and_then(|v| v.get("info")).and_then(|v| v.get("name")).and_then(Value::as_str) {
                 item.name = name.to_string();
-            } else if let Some(path) = status.get("files").and_then(Value::as_array).and_then(|a| a.first())
-                .and_then(|v| v.get("path")).and_then(Value::as_str) {
-                if !path.is_empty() {
-                    item.path = path.to_string();
-                    if let Some(name) = std::path::Path::new(path).file_name().and_then(|s| s.to_str()) { item.name = name.to_string(); }
+            } else if let Some(files) = status.get("files").and_then(Value::as_array) {
+                item.files = files.iter()
+                    .filter_map(|entry| entry.get("path").and_then(Value::as_str))
+                    .filter(|path| !path.trim().is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if let Some(path) = item.files.first() {
+                    item.path = path.clone();
+                    if let Some(name) = std::path::Path::new(path).file_name().and_then(|s| s.to_str()) {
+                        if !item.is_torrent { item.name = name.to_string(); }
+                    }
                 }
             }
             if item.status == "error" {
@@ -2205,11 +2214,27 @@ fn open_download_folder(engine: State<'_, Engine>, gid: String) -> Result<(), St
 
 // Commit the history change on disk before publishing it in memory. If the
 // filesystem is full or not writable, a failed removal must remain visible.
-fn remove_download_file(item: &Download) -> Result<(), String> {
-    if item.path.trim().is_empty() { return Ok(()); }
-    let file = std::path::Path::new(&item.path);
-    if file.is_file() { fs::remove_file(file).map_err(|error| format!("Could not delete {}: {error}", file.display()))?; }
-    Ok(())
+fn remove_download_files(item: &Download) -> Result<usize, String> {
+    let mut paths = item.files.clone();
+    if !item.path.trim().is_empty() && !paths.iter().any(|path| path == &item.path) {
+        paths.push(item.path.clone());
+    }
+    let mut deleted = 0;
+    for raw_path in paths {
+        let file = std::path::Path::new(&raw_path);
+        // Only remove regular files. Never follow or remove symlinks, directories,
+        // or arbitrary paths that aria2 may report for a folder-level torrent.
+        let metadata = match fs::symlink_metadata(file) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("Could not inspect {}: {error}", file.display())),
+        };
+        if metadata.file_type().is_file() {
+            fs::remove_file(file).map_err(|error| format!("Could not delete {}: {error}", file.display()))?;
+            deleted += 1;
+        }
+    }
+    Ok(deleted)
 }
 
 fn forget_history_entry(
@@ -2222,7 +2247,7 @@ fn forget_history_entry(
     if matches!(item.status.as_str(), "active" | "waiting" | "paused" | "recovering") {
         return Err("Stop the download before removing it from history".into());
     }
-    if delete_file { remove_download_file(item)?; }
+    if delete_file { remove_download_files(item)?; }
     let mut next = entries.clone();
     next.remove(gid);
     save_json(path, &next)?;
@@ -2237,7 +2262,7 @@ fn clear_completed_history(
     delete_files: bool,
 ) -> Result<usize, String> {
     if delete_files {
-        for item in entries.values().filter(|item| item.status == "complete") { remove_download_file(item)?; }
+        for item in entries.values().filter(|item| item.status == "complete") { remove_download_files(item)?; }
     }
     let completed = entries.values().filter(|item| item.status == "complete").count();
     if completed == 0 {
@@ -2355,7 +2380,7 @@ mod tests {
             gid: gid.into(), source: "https://example.org/file".into(),
             is_torrent: false, name: gid.into(), status: status.into(),
             completed_length: 0, total_length: 10, download_speed: 0,
-            upload_speed: 0, path: String::new(), error: None,
+            upload_speed: 0, path: String::new(), files: Vec::new(), error: None,
         };
         let mut items = vec![
             make("done", "complete"),
@@ -2409,7 +2434,7 @@ mod tests {
             gid: gid.into(), source: "https://example.org/file".into(),
             is_torrent: false, name: gid.into(), status: status.into(),
             completed_length: 0, total_length: 10, download_speed: 0,
-            upload_speed: 0, path: String::new(), error: None,
+            upload_speed: 0, path: String::new(), files: Vec::new(), error: None,
         };
         let mut entries = BTreeMap::from([
             ("done".into(), make("done", "complete")),
@@ -2433,6 +2458,41 @@ mod tests {
     }
 
     #[test]
+    fn deleting_torrent_history_removes_every_recorded_file_but_not_directories_or_symlinks() {
+        let folder = std::env::temp_dir().join(format!("dm-torrent-delete-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&folder).unwrap();
+        let first = folder.join("first.mkv");
+        let second = folder.join("second.srt");
+        let nested = folder.join("nested");
+        fs::create_dir_all(&nested).unwrap();
+        let link = folder.join("linked-file");
+        fs::write(&first, b"video").unwrap();
+        fs::write(&second, b"subtitle").unwrap();
+        fs::write(nested.join("keep.txt"), b"keep").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&first, &link).unwrap();
+        let item = Download {
+            gid: "torrent".into(), source: "magnet:?xt=urn:btih:test".into(),
+            is_torrent: true, name: "Example torrent".into(), status: "complete".into(),
+            completed_length: 12, total_length: 12, download_speed: 0, upload_speed: 0,
+            path: first.to_string_lossy().into_owned(),
+            files: vec![first.to_string_lossy().into_owned(), second.to_string_lossy().into_owned(),
+                nested.to_string_lossy().into_owned()],
+            error: None,
+        };
+        assert_eq!(remove_download_files(&item).unwrap(), 2);
+        assert!(!first.exists());
+        assert!(!second.exists());
+        assert!(nested.join("keep.txt").exists());
+        #[cfg(unix)]
+        {
+            assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+            fs::remove_file(&link).unwrap();
+        }
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn failed_history_removal_preserves_download_and_success_persists() {
         let folder = std::env::temp_dir().join(format!("dm-forget-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&folder).unwrap();
@@ -2441,7 +2501,7 @@ mod tests {
             gid: "done".into(), source: "https://example.org/test.txt".into(),
             is_torrent: false, name: "test.txt".into(), status: "complete".into(),
             completed_length: 4, total_length: 4, download_speed: 0,
-            upload_speed: 0, path: String::new(), error: None,
+            upload_speed: 0, path: String::new(), files: Vec::new(), error: None,
         };
         let mut entries = BTreeMap::from([("done".to_string(), item.clone())]);
         save_json(&path, &entries).unwrap();
@@ -2476,7 +2536,7 @@ mod tests {
             gid: "one".into(), source: "https://example.org/fixture.txt".into(),
             is_torrent: false, name: "fixture.txt".into(), status: "active".into(),
             completed_length: 7, total_length: 7, download_speed: 0,
-            upload_speed: 0, path: file.to_string_lossy().into_owned(), error: None,
+            upload_speed: 0, path: file.to_string_lossy().into_owned(), files: vec![file.to_string_lossy().into_owned()], error: None,
         };
         assert!(completed_download_folder(&item).is_err());
         item.status = "complete".into();
@@ -2705,7 +2765,7 @@ mod tests {
             gid: gid.into(), source: "https://example.org/file".into(),
             is_torrent: false, name: gid.into(), status: status.into(),
             completed_length: 0, total_length: 10, download_speed: 120,
-            upload_speed: 0, path: String::new(), error: None,
+            upload_speed: 0, path: String::new(), files: Vec::new(), error: None,
         };
         let mut entries = BTreeMap::from([
             ("active".into(), make("active", "active")),
@@ -2775,7 +2835,7 @@ mod tests {
             gid: "one".into(), source: "https://example.org/file".into(),
             is_torrent: false, name: "file".into(), status: "active".into(),
             completed_length: 100, total_length: 200, download_speed: 10,
-            upload_speed: 0, path: "/tmp/file".into(), error: None,
+            upload_speed: 0, path: "/tmp/file".into(), files: vec!["/tmp/file".into()], error: None,
         };
         let mut changed = item.clone();
         changed.download_speed = 99;
@@ -2822,11 +2882,12 @@ mod tests {
         let item = Download { gid: "abc123".into(), source: "https://example.org/a.zip".into(), is_torrent: false,
             name: "a.zip".into(), status: "complete".into(), completed_length: 30,
             total_length: 30, download_speed: 0, upload_speed: 0,
-            path: "/tmp/a.zip".into(), error: None };
+            path: "/tmp/a.zip".into(), files: vec!["/tmp/a.zip".into()], error: None };
         let encoded = serde_json::to_string(&item).unwrap();
         let decoded: Download = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.gid, "abc123");
         assert_eq!(decoded.completed_length, 30);
+        assert_eq!(decoded.files, vec!["/tmp/a.zip"]);
     }
 }
 
