@@ -538,3 +538,12 @@ This is an initial implementation. RSS polling does not run when the app is clos
 ## Scheduler restart safety
 
 An armed, running or power-pending schedule is **cancelled on application restart**. Recovered aria2 transfers can start as soon as aria2 restores its session, so the app must never imply that a previous scheduled start time still controls them. Restarted schedules cannot trigger a stale automatic sleep/shutdown command. Users should re-arm a new schedule only after reviewing the restored queue. A scheduler that survives app exits without starting early needs a persistent service or improved queue persistence; this is not implemented yet.
+
+
+## Clipboard, categories and file cleanup
+
+- The desktop app checks the system clipboard while its window is focused. A newly copied HTTP, HTTPS, FTP or magnet link opens the New Download dialog for review; it is never queued without the user pressing Add.
+- The New Download dialog lets you choose a one-time destination or save that directory as the default for future downloads.
+- Compressed files and videos are sorted into `Compressed` and `Videos` subfolders by default. Audio, images, documents, programs and unknown file types stay in the main download folder unless a custom category directory is configured. Category extension lists are editable in Settings → Browser & Files.
+- Removing a completed direct download or clearing completed history asks whether to delete the local payload. Choosing history-only keeps the file. Active transfers cannot be removed. Media-job output files are not currently included in this delete option.
+- Clipboard access requires the app's native clipboard permission. Some Linux desktop sessions may restrict clipboard reads; in that case, paste the link manually.

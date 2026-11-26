@@ -292,3 +292,6 @@
 @media (prefers-reduced-motion: reduce) {
   .toast-notification { animation: none; }
 }
+
+/* Download categories and extension editor */
+.category-editor{border:1px solid #313c5c;border-radius:11px;padding:12px;margin:12px 0;background:#171d34}.category-editor>strong{display:block;color:#ece9ff;margin-bottom:9px}.extension-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.extension-chips button{display:inline-flex;align-items:center;gap:4px;border:1px solid #414a6d;border-radius:7px;background:#242b48;color:#d6d9f4;padding:5px 7px;font-size:11px}.category-editor .input-row{display:flex;gap:8px}.category-editor .input-row input{flex:1;min-width:0}.category-editor .input-row button{border:1px solid #55517d;border-radius:8px;background:#39345f;color:#f0eaff;padding:0 12px;font-weight:700}.danger-button{background:#a04c69!important;border-color:#a04c69!important;color:#fff!important}.danger-button:hover{background:#b95c7b!important}
