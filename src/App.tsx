@@ -156,6 +156,7 @@ export default function App() {
   const [engineOnline, setEngineOnline] = useState(false);
   const [settingsError, setSettingsError] = useState("");
   const refreshing = useRef(false);
+  const mediaRefreshing = useRef(false);
   const selectView = (view: Filter) => {
     setFilter(view);
     setQuery("");
@@ -169,7 +170,6 @@ export default function App() {
       const list = await invoke<DownloadItem[]>("list_downloads");
       setItems(list);
       void invoke<Schedule>("get_schedule").then(setSchedule).catch(() => {});
-      void invoke<MediaJob[]>("list_media_jobs").then(setMediaJobs).catch(() => {});
       setRefreshError("");
     } catch (err) {
       setRefreshError(String(err));
@@ -369,13 +369,22 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    const poll = () => {
-      void invoke<MediaJob[]>("list_media_jobs")
-        .then(jobs => { if (mounted) setMediaJobs(jobs); })
-        .catch(() => {});
+    const poll = async () => {
+      // Media jobs have their own polling loop; never overlap requests when
+      // the backend is busy, and keep this separate from download-list refresh.
+      if (mediaRefreshing.current) return;
+      mediaRefreshing.current = true;
+      try {
+        const jobs = await invoke<MediaJob[]>("list_media_jobs");
+        if (mounted) setMediaJobs(jobs);
+      } catch {
+        // A transient media status failure should not interrupt other downloads.
+      } finally {
+        mediaRefreshing.current = false;
+      }
     };
-    poll();
-    const timer = window.setInterval(poll, 1500);
+    void poll();
+    const timer = window.setInterval(() => void poll(), 1500);
     return () => { mounted = false; window.clearInterval(timer); };
   }, []);
 
