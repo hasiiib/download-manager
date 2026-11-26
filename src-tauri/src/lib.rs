@@ -42,7 +42,7 @@ struct Settings {
 }
 
 fn aria2_server_connections(requested: u8) -> u8 { requested.min(16) }
-fn default_min_split_size_mib() -> u8 { 4 }
+fn default_min_split_size_mib() -> u8 { 2 }
 fn default_refresh_seconds() -> u8 { 3 }
 fn default_low_memory_mode() -> bool { true }
 
@@ -2529,6 +2529,14 @@ mod tests {
         assert!(media_format_args("id:--exec").is_err());
         assert!(media_format_args("id:").is_err());
         assert!(media_format_args("--exec").is_err());
+    }
+
+    #[test]
+    fn default_http_segmentation_is_tuned_for_medium_sized_files() {
+        let settings = Settings::defaults();
+        assert_eq!(settings.connections, 8);
+        assert_eq!(settings.min_split_size_mib, 2);
+        assert_eq!(aria2_server_connections(settings.connections), 8);
     }
 
     #[test]

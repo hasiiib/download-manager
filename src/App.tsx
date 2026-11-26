@@ -67,7 +67,7 @@ const viewDescriptions: Record<Filter, string> = {
   torrent: "Your magnet and BitTorrent downloads.",
 };
 type SettingsTab = "general" | "connection" | "save" | "downloads" | "integration" | "privacy";
-const defaults: Settings = { connections: 8, minSplitSizeMib: 4, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
+const defaults: Settings = { connections: 8, minSplitSizeMib: 2, concurrent: 3, speedLimitKib: 0, seedMinutes: 0, downloadDir: "", refreshSeconds: 3, lowMemoryMode: true };
 const formatSize = (n = 0) => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
 const formatEta = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return "Calculating...";
@@ -854,7 +854,7 @@ export default function App() {
               <label><span>Minimum segment size (MiB)</span><input type="number" min="1" max="64" value={draft.minSplitSizeMib} onChange={e => setDraft(s => ({ ...s, minSplitSizeMib: Number(e.target.value) }))}/></label>
               <label><span>Maximum concurrent downloads</span><input type="number" min="1" max="10" value={draft.concurrent} onChange={e => setDraft(s => ({ ...s, concurrent: Number(e.target.value) }))}/></label>
               <label><span>Overall speed limit (KiB/s, 0 = unlimited)</span><input type="number" min="0" max="1048576" value={draft.speedLimitKib} onChange={e => setDraft(s => ({ ...s, speedLimitKib: Number(e.target.value) }))}/></label>
-              <p className="settings-note">Allows up to 32 requested segments per download. Stock aria2 caps connections to a single server at 16, so 32 segments do not guarantee 32 same-server connections. Settings affect newly queued downloads; results depend on HTTP range support and server limits.</p>
+              <p className="settings-note">Allows up to 32 requested segments per download. Stock aria2 caps connections to a single server at 16, so 32 segments do not guarantee 32 same-server connections. Settings affect newly queued downloads. A 2 MiB segment size lets medium-sized files split earlier; smaller values can add request overhead. Results depend on HTTP range support and server limits.</p>
             </>}
             {settingsTab === "save" && <>
               <h3>Save To</h3><p>Choose where new downloads are stored.</p>

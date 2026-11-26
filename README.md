@@ -10,7 +10,7 @@ A Linux-first desktop download manager built with **Tauri 2**, **React**, **Type
 - Enter HTTP, HTTPS, FTP and magnet links (SFTP is not supported by the current aria2 engine).
 - Import `.torrent`, `.meta4` and `.metalink` files with a native file picker or full path.
 - Torrent file selection dialog with file sizes, per-file progress, tracker URLs and connected peer count (once metadata is available).
-- Segmented HTTP(S) transfers when the server supports range requests (through aria2).
+- Segmented HTTP(S) transfers when the server supports range requests (through aria2), with a balanced default of 8 requested connections and 2 MiB minimum segments. aria2 caps same-server connections at 16; servers may limit or reject parallel requests.
 - Pause/resume/cancel controls and top/bottom priority actions for waiting downloads, subject to protocol/server support.
 - Download history stored locally as JSON, plus aria2's session persistence.
 - Settings: connections per server (1–16), concurrent downloads (1–10), overall speed limit, target directory and optional torrent seeding time.
@@ -72,6 +72,11 @@ IDM's public feature documentation is used only as a functional reference. This 
 ## Licensing
 
 No license has yet been selected for this application. Review library and engine licenses before any distribution.
+
+## Download speed tuning
+
+- New installations use a 2 MiB minimum segment size instead of 4 MiB. Since aria2 needs at least two minimum-size ranges to split a file, this allows supported HTTP servers to parallelize medium-sized files earlier while retaining the moderate default of 8 requested segments.
+- Existing saved settings are preserved. To use the new setting on an existing installation, open Settings → Connection and set Minimum segment size to `2` MiB. More connections do not guarantee higher speed: the server must support byte ranges and may enforce its own limits.
 
 ## Recent reliability fixes
 
