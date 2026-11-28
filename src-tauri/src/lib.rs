@@ -432,6 +432,7 @@ fn requires_immediate_history_save(old: &Download, new: &Download) -> bool {
         || old.name != new.name
         || old.is_torrent != new.is_torrent
         || old.path != new.path
+        || old.files != new.files
         || old.error != new.error
 }
 
@@ -2847,6 +2848,12 @@ mod tests {
         changed.download_speed = 99;
         changed.completed_length = 150;
         assert!(!requires_immediate_history_save(&item, &changed));
+
+        // Torrent payload paths are required for safe file deletion after restart.
+        changed.files = vec!["/tmp/another-file".into()];
+        assert!(requires_immediate_history_save(&item, &changed));
+
+        changed = item.clone();
         changed.status = "complete".into();
         assert!(requires_immediate_history_save(&item, &changed));
         changed.status = "active".into();
